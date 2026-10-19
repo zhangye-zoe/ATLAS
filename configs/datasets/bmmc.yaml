@@ -1,0 +1,40 @@
+name: BMMC
+project_root: .
+split_root: data/processed/BMMC/RNA_ATAC/results_ratio_loop_rna_atac
+modalities:
+  rna:
+    train_file: train_rna_ref.h5ad
+    validation_file: val_true_rna.h5ad
+  atac:
+    train_file: train_atac_activity.h5ad
+    validation_file: val_atac_activity.h5ad
+query_atac_file: val_atac_activity.h5ad
+target_rna_file: val_true_rna.h5ad
+label_key: cell_type
+external_labels:
+  csv: null
+  cell_column: cell_id
+  label_column: cell_type
+stage_map:
+  HSC: 0
+  Lymph prog: 1
+  G/M prog: 1
+  MK/E prog: 1
+  ID2-hi myeloid prog: 1
+  CD4+ T naive: 2
+  CD8+ T naive: 2
+  Naive CD20+ B: 2
+  Transitional B: 2
+  B1 B: 2
+  Proerythroblast: 2
+  NK: 3
+  CD8+ T: 3
+  CD4+ T activated: 3
+  CD14+ Mono: 3
+  CD16+ Mono: 3
+  pDC: 3
+  cDC2: 3
+  ILC: 3
+  Plasma cell: 3
+  Erythroblast: 3
+  Normoblast: 4

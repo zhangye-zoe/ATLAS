@@ -1,0 +1,43 @@
+name: PBMC
+project_root: .
+split_root: data/processed/PBMC/RNA_ATAC/results_ratio_loop
+modalities:
+  rna:
+    train_file: train_rna_ref.h5ad
+    validation_file: val_true_rna.h5ad
+  atac:
+    train_file: train_atac_activity.h5ad
+    validation_file: val_atac_activity.h5ad
+query_atac_file: val_atac_activity.h5ad
+target_rna_file: val_true_rna.h5ad
+label_key: cell_type
+# Optional if cell_type is not already stored in .obs. Keep null to use .obs only.
+external_labels:
+  csv: null
+  cell_column: cell_id
+  label_column: predicted.celltype.l2
+stage_map:
+  HSPC: 0
+  B naive: 1
+  CD4 Naive: 1
+  CD8 Naive: 1
+  Eryth: 1
+  B intermediate: 2
+  CD4 TCM: 2
+  CD8 TCM: 2
+  CD14 Mono: 2
+  CD16 Mono: 2
+  cDC1: 2
+  cDC2: 2
+  pDC: 2
+  CD4 Proliferating: 2
+  NK Proliferating: 2
+  B memory: 3
+  Plasmablast: 3
+  CD4 TEM: 3
+  CD8 TEM: 3
+  Treg: 3
+  MAIT: 3
+  NK: 3
+  dnT: 3
+  gdT: 3
