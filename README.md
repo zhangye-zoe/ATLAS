@@ -1,43 +1,77 @@
 # Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics
 
-This repository combines the original **ATLAS** preprocessing project with the supplied **GLOAM_v05_T3final2** implementation, renamed under the `atlas` Python package. The supplied *code* is treated as authoritative where the manuscript predates fixes, notably paired and unpaired loss terms. See `docs/IMPLEMENTATION_NOTES.md` for provenance, limitations and evaluation definitions.
+[![GitHub Stars](https://img.shields.io/github/stars/zhangye-zoe/ATLAS?style=social)](https://github.com/zhangye-zoe/ATLAS/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/zhangye-zoe/ATLAS?style=social)](https://github.com/zhangye-zoe/ATLAS/network/members)
 
-## Installation
+This is the official code repository for our paper accepted at NeurIPS 2026:
+**ATLAS: Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics**
+
+- **Paper Link:** [Read the Paper](https://openreview.net/pdf?id=TEIXzoW2jj)
+- **Publication:** Advances in Neural Information Processing Systems (NeurIPS) 2026
+- **Authors:** Ye Zhang, Zijie Fang, Zhixiang Lin
+
+
+## Progress
+> ℹ️ Some components are still being refactored. The codebase will continue to be updated.
+
+**2026-10-19**  
+- Added core ATLAS modules for multi-omics alignment, temporal inference, and lag-aware modeling.
+
+
+**2026-09-11**
+- PBMC RNA–ATAC
+- BMMC RNA–ATAC
+- BMMC RNA–Protein
+- Detailed preprocessing instructions are available in [`preprocessing/PREPROCESSING.md`](preprocessing/PREPROCESSING.md).
+
+## 🌟 Highlights
+
+- Multi-omics representation learning and alignment for paired, partially paired, and unpaired data.
+- Reliability-guided temporal distillation for cell-state ordering.
+- Adaptive cross-omics lag modeling with paired and unpaired training objectives.
+- Support for cross-modal alignment (T1), cross-omics prediction (T2), and trajectory inference (T3) in the current code.
+
+## 🚀 Installation
 
 ```bash
-python -m pip install -r requirements.txt
-python -m pip install -e .
-pytest -q
+git clone https://github.com/zhangye-zoe/ATLAS.git
+cd ATLAS
+pip install -r requirements.txt
+pip install -e .
 ```
 
-## Data preprocessing
+## 📊 Dataset Preparation
 
-See `preprocessing/PREPROCESSING.md` and `docs/data_prepare.md`. Preprocessed PBMC/BMMC ratio-loop datasets are expected under `data/processed/`. These **are not bundled** with the repository. You can symlink a data directory at `ATLAS/data`.
+The preprocessing pipelines cover PBMC RNA–ATAC, BMMC RNA–ATAC, and BMMC RNA–protein datasets.
 
-## Train and evaluate T1–T3 (PBMC/BMMC)
+See [Data Preprocessing Guide](./preprocessing/PREPROCESSING.md) for details. Preprocessed training data are not included in the source archive.
+
+## 🧪 Training and Evaluation
+
+Run T1–T3 on PBMC or BMMC after preparing the data:
 
 ```bash
 python experiments/run_table2.py --dataset pbmc --pair-ratios 0 40 100 --device cuda:0
 python experiments/run_table2.py --dataset bmmc --pair-ratios 0 40 100 --device cuda:0
 ```
 
-Quick pipeline test with *your preprocessed data*:
+For a quick pipeline check:
 
 ```bash
 python experiments/run_table2.py --dataset pbmc --pair-ratios 0 --device cpu --quick
 ```
 
-Outputs go to `results/table2/<dataset>/pair_***/`. Use `--output-root` for another directory.
+The HSPC future-state prediction (T4) benchmark is not yet included as an end-to-end experiment in this source package.
 
-## Tasks and honest scope
+## 📖 Citation
 
-- **T1**: historical CORAL-compatible FOSCTTM/PED on PCA of true RNA and ATAC-predicted RNA; not direct latent-space FOSCTTM.
-- **T2**: ATAC-only source input to predict RNA, evaluated by Pearson and RMSE.
-- **T3**: temporal teacher, learned TimeHead, POA/POAUC from labeled stages.
-- **T4**: The HSPC-specific future-state/fate prediction experiment is **not present in either supplied source archive**, and original processed HSPC data and splits are absent. It is not claimed reproduced. The reusable generic T4 evaluation utility `atlas.future_state` and its tests are included, but its benchmark-specific data adapter/training are still required.
+If you find our work useful, please cite:
 
-## Key implementation
-
-`src/atlas/model.py`, `losses.py`, `trainer.py`, `temporal.py`, `lag.py`, `unpaired.py`, `data.py`, `metrics.py`.
-
-The current source code implements OT-based unpaired objectives, temporal teaching, cross-omics lag bank and multi-stage optimization. Training requires real processed datasets. Code checks are not a replacement for reproducing published numerical results.
+```bibtex
+@inproceedings{zhang2026atlas,
+  title={ATLAS: Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics},
+  author={Zhang, Ye and Fang, Zijie and Lin, Zhixiang},
+  booktitle={Advances in Neural Information Processing Systems},
+  year={2026}
+}
+```
