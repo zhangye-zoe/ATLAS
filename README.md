@@ -1,4 +1,4 @@
-# ATLAS — Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics
+# Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics
 
 This repository combines the original **ATLAS** preprocessing project with the supplied **GLOAM_v05_T3final2** implementation, renamed under the `atlas` Python package. The supplied *code* is treated as authoritative where the manuscript predates fixes, notably paired and unpaired loss terms. See `docs/IMPLEMENTATION_NOTES.md` for provenance, limitations and evaluation definitions.
 
