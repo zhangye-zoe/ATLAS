@@ -1,7 +1,8 @@
 # Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics
 
-[![GitHub Stars](https://img.shields.io/github/stars/zhangye-zoe/ATLAS?style=social)](https://github.com/zhangye-zoe/ATLAS/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/zhangye-zoe/ATLAS?style=social)](https://github.com/zhangye-zoe/ATLAS/network/members)
+[![GitHub Stars](https://img.shields.io/github/stars/zhangye-zoe/ATLAS?style=flat&logo=github)](https://github.com/zhangye-zoe/ATLAS/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/zhangye-zoe/ATLAS?style=flat&logo=github)](https://github.com/zhangye-zoe/ATLAS/network/members)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/zhangye-zoe/FCIS/blob/main/LICENSE)
 
 This is the official code repository for our paper accepted at NeurIPS 2026:
 **ATLAS: Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics**
