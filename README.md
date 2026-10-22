@@ -15,6 +15,10 @@ This is the official code repository for our paper accepted at NeurIPS 2026:
 ## Progress
 > ℹ️ Some components are still being refactored. The codebase will continue to be updated.
 
+**2026-10-22**
+- Added external annotation resources (GENCODE v38 and HGNC) and CD-to-gene mapping scripts.
+- Reorganized the data directory structure and updated preprocessing documentation.
+
 **2026-10-19**  
 - Added core ATLAS modules for multi-omics alignment, temporal inference, and lag-aware modeling.
 

@@ -2,17 +2,43 @@
 # ATLAS .gitignore
 # =========================
 
-
-# -------------------------
+# ==========================================
 # Data: keep directory structure only
-# -------------------------
-/data/**
+# ==========================================
 
-# Keep directories visible so .gitkeep can be tracked
-!/data/**/
+# 1. Raw training datasets
+/data/raw/**
+!/data/raw/**/
+!/data/raw/**/.gitkeep
 
-# Keep placeholder files
-!/data/**/.gitkeep
+# 2. Intermediate preprocessing outputs
+/data/interim/**
+!/data/interim/**/
+!/data/interim/**/.gitkeep
+
+# 3. Processed training datasets
+/data/processed/**
+!/data/processed/**/
+!/data/processed/**/.gitkeep
+
+# 4. External annotation data
+/data/external/annotations/**
+!/data/external/annotations/**/
+!/data/external/annotations/**/.gitkeep
+
+# 5. Preprocessing logs
+/preprocessing/logs/**
+!/preprocessing/logs/**/
+!/preprocessing/logs/**/.gitkeep
+
+# 6. Python temporary files
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+
+# 7. System files
+.DS_Store
 
 
 # -------------------------
@@ -94,3 +120,5 @@ Thumbs.db
 *.pickle
 *.npy
 *.npz
+
+results/

@@ -1,79 +1,177 @@
-# ATLAS: Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics
+# ATLAS Data Preprocessing
 
-[![GitHub Stars](https://img.shields.io/github/stars/zhangye-zoe/ATLAS?style=social)](https://github.com/zhangye-zoe/ATLAS/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/zhangye-zoe/ATLAS?style=social)](https://github.com/zhangye-zoe/ATLAS/network/members)
+## 1. Download links and external files
 
-This is the official code repository for our paper accepted at **NeurIPS 2026**:
+### PBMC RNA–ATAC
 
-**ATLAS: Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics**
+Dataset: [10k Human PBMCs Multiome](https://www.10xgenomics.com/datasets/10-k-human-pbm-cs-multiome-v-1-0-chromium-x-1-standard-2-0-0)
 
-- **Publication:** Advances in Neural Information Processing Systems (NeurIPS), 2026
-- **Authors:** Ye Zhang, Zijie Fang, Zhixiang Lin
-- **Code:** [GitHub](https://github.com/zhangye-zoe/ATLAS)
+Download:
 
-## Progress
-
-**2026-10-19**  
-- Added core ATLAS modules for multi-omics alignment, temporal inference, and lag-aware modeling.
-
-> ℹ️ Some components are still being refactored. The codebase will continue to be updated.
-
-**2026-09-11**  
-Completed preprocessing pipelines for:
-- PBMC RNA–ATAC
-- BMMC RNA–ATAC
-- BMMC RNA–Protein
-
-Detailed preprocessing instructions are available in [`preprocessing/PREPROCESSING.md`](preprocessing/PREPROCESSING.md).
-
-## 🌟 Highlights
-
-- Multi-omics representation learning and alignment for paired, partially paired, and unpaired data.
-- Reliability-guided temporal distillation for cell-state ordering.
-- Adaptive cross-omics lag modeling with paired and unpaired training objectives.
-- Support for cross-modal alignment (T1), cross-omics prediction (T2), and trajectory inference (T3) in the current code.
-
-## 🚀 Installation
-
-```bash
-git clone https://github.com/zhangye-zoe/ATLAS.git
-cd ATLAS
-pip install -r requirements.txt
-pip install -e .
+```text
+pbmc_granulocyte_sorted_10k_filtered_feature_bc_matrix.h5
 ```
 
-## 📊 Dataset Preparation
+Save to:
 
-The preprocessing pipelines cover PBMC RNA–ATAC, BMMC RNA–ATAC, and BMMC RNA–protein datasets.
-
-See [Data Preprocessing Guide](./preprocessing/PREPROCESSING.md) for details. Preprocessed training data are not included in the source archive.
-
-## 🧪 Training and Evaluation
-
-Run T1–T3 on PBMC or BMMC after preparing the data:
-
-```bash
-python experiments/run_table2.py --dataset pbmc --pair-ratios 0 40 100 --device cuda:0
-python experiments/run_table2.py --dataset bmmc --pair-ratios 0 40 100 --device cuda:0
+```text
+data/raw/PBMC/
 ```
 
-For a quick pipeline check:
+### BMMC RNA–ATAC / RNA–Protein
 
-```bash
-python experiments/run_table2.py --dataset pbmc --pair-ratios 0 --device cpu --quick
+Dataset: [GSE194122](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE194122)
+
+Download:
+
+```text
+GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad.gz
+GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad.gz
 ```
 
-The HSPC future-state prediction (T4) benchmark is not yet included as an end-to-end experiment in this source package.
+Decompress:
 
-## 📖 Citation
+```bash
+gunzip GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad.gz
+gunzip GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad.gz
+```
 
-If you find our work useful, please cite:
+Save to:
 
-```bibtex
-@inproceedings{zhang2026atlas,
-  title={ATLAS: Adaptive Temporal Learning for Single-Cell Multi-Omics Alignment and Dynamics},
-  author={Zhang, Ye and Fang, Zijie and Lin, Zhixiang},
-  booktitle={Advances in Neural Information Processing Systems},
-  year={2026}
-}
+```text
+data/raw/BMMC/
+```
+
+### External annotations
+
+Required for PBMC/BMMC RNA–ATAC:
+
+```text
+data/external/annotations/gencode.v38.primary_assembly.annotation.gtf
+```
+
+Optional for BMMC RNA–Protein:
+
+```text
+data/external/annotations/hgnc_cd_gene_mapping.csv
+```
+
+The HGNC mapping file can be copied from the previous project:
+
+```bash
+cp /data5/zhangye/scMRDR/scripts/BMMC/CD_gene/group-471.csv \
+   /data5/zhangye/ATLAS/data/external/annotations/hgnc_cd_gene_mapping.csv
+```
+
+---
+
+## 2. Preprocessing scripts
+
+```text
+preprocessing/
+├── configs/
+│   ├── bmmc.yaml
+│   └── pbmc.yaml
+├── logs/
+├── scripts/
+│   ├── common.py
+│   ├── preprocess_bmmc_rna_atac.py
+│   ├── preprocess_bmmc_rna_protein.py
+│   └── preprocess_pbmc_rna_atac.py
+├── run_bmmc.sh
+└── run_pbmc.sh
+```
+
+Run from the ATLAS root:
+
+```bash
+cd /data5/zhangye/ATLAS
+```
+
+PBMC RNA–ATAC:
+
+```bash
+bash preprocessing/run_pbmc.sh
+```
+
+BMMC RNA–ATAC and RNA–Protein:
+
+```bash
+bash preprocessing/run_bmmc.sh
+```
+
+Or run scripts individually:
+
+```bash
+python preprocessing/scripts/preprocess_pbmc_rna_atac.py \
+  --config preprocessing/configs/pbmc.yaml
+
+python preprocessing/scripts/preprocess_bmmc_rna_atac.py \
+  --config preprocessing/configs/bmmc.yaml
+
+python preprocessing/scripts/preprocess_bmmc_rna_protein.py \
+  --config preprocessing/configs/bmmc.yaml
+```
+
+---
+
+## 3. Generated directory structure
+
+```text
+data/
+├── raw/
+│   ├── PBMC/
+│   │   └── pbmc_granulocyte_sorted_10k_filtered_feature_bc_matrix.h5
+│   │   
+│   └── BMMC/
+│       ├── GSE194122_openproblems_neurips2021_multiome_BMMC_processed.h5ad
+│       └── GSE194122_openproblems_neurips2021_cite_BMMC_processed.h5ad
+│
+├── external/
+│   └── annotations/
+│       ├── gencode.v38.primary_assembly.annotation.gtf
+│       └── hgnc_cd_gene_mapping.csv
+│
+├── interim/
+│   ├── PBMC/
+│   │   └── RNA_ATAC/
+│   │       ├── RNA_counts_qc.h5ad
+│   │       ├── ATAC_counts_qc.h5ad
+│   │       ├── ATAC_gas.h5ad
+│   │       └── feature_aligned.h5ad
+│   │
+│   └── BMMC/
+│       ├── RNA_ATAC/
+│       │   ├── RNA_counts_qc.h5ad
+│       │   ├── ATAC_counts_qc.h5ad
+│       │   ├── ATAC_gas.h5ad
+│       │   └── feature_aligned_rna_atac.h5ad
+│       │
+│       └── RNA_PROTEIN/
+│           ├── RNA_counts_qc.h5ad
+│           ├── protein_counts_qc.h5ad
+│           └── feature_aligned_rna_protein.h5ad
+│
+└── processed/
+    ├── PBMC/
+    │   └── RNA_ATAC/
+    │       └── results_ratio_loop/
+    │
+    └── BMMC/
+        ├── RNA_ATAC/
+        │   └── results_ratio_loop_rna_atac/
+        └── RNA_PROTEIN/
+            └── results_ratio_loop_rna_protein/
+```
+
+Each `results_ratio_loop*` directory contains:
+
+```text
+single_000/
+single_020/
+single_040/
+single_060/
+single_080/
+single_100/
+summary_all_ratios.csv
 ```
