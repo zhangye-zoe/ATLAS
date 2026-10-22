@@ -68,6 +68,10 @@ python experiments/run_table2.py --dataset pbmc --pair-ratios 0 --device cpu --q
 
 The HSPC future-state prediction (T4) benchmark is not yet included as an end-to-end experiment in this source package.
 
+## 📈 Experimental Results
+
+See [Experimental Results](./docs/RESULTS.md) for the paper-reported reference tables, metric conventions, and reproduction tracking. Generated experiment artifacts are stored locally under `results/`.
+
 ## 📖 Citation
 
 If you find our work useful, please cite:
