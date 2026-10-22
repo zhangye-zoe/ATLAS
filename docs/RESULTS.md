@@ -148,9 +148,9 @@ results/
         └── summary.json
 ~~~
 
-Within each ~~~pair_XXX/~~~ directory, the runner stores ~~~metrics.json~~~, ~~~training_history.json~~~, ~~~model.pt~~~, and diagnostic outputs. The ~~~results/~~~ directory is ignored by Git; this Markdown file is a **version-controlled, human-readable summary**.
+Within each `pair_XXX/` directory, the runner stores `metrics.json`, `training_history.json`, `model.pt`, and diagnostic outputs. The `results/` directory is ignored by Git; this Markdown file is a **version-controlled, human-readable summary**.
 
-**Pairing convention:** ~~~pair_000~~~ reads ~~~single_100~~~ preprocessing outputs; ~~~pair_040~~~ reads ~~~single_060~~~; and ~~~pair_100~~~ reads ~~~single_000~~~.
+**Pairing convention:** `pair_000` reads `single_100` preprocessing outputs; `pair_040` reads `single_060`; and `pair_100` reads `single_000`.
 
 ### Run Record Template
 
@@ -177,15 +177,15 @@ Notes:
 1. **Separate paper references from reproduced results.** Matching metric names does not guarantee matching evaluation protocols, preprocessing, datasets, or train/validation splits.
 2. **Current T1 code** evaluates predicted RNA against observed RNA after joint PCA (up to 30 components), rather than directly computing ATAC–RNA shared-latent distances. Record the exact protocol and verify comparability before comparing against the manuscript's Table 2.
 3. **Current T2 code** predicts RNA from ATAC-only input and evaluates against held-out true RNA after inverse standardization.
-4. **Current T3 code** defaults to ~~~paired_fused~~~ validation inputs and chooses pseudotime orientation using reference stages for evaluation; this is a reference-oriented score. Report any stricter orientation-free or source-only experiments separately.
+4. **Current T3 code** defaults to `paired_fused` validation inputs and chooses pseudotime orientation using reference stages for evaluation; this is a reference-oriented score. Report any stricter orientation-free or source-only experiments separately.
 5. **T4** has metric helpers in the public code, but the complete HSPC future-state experiment pipeline is not yet available in this repository.
 6. **BMMC RNA–Protein** has a preprocessing pipeline; the current Table 2 runner evaluates the BMMC RNA–ATAC split. Keep these experiments distinct.
 
 ### Source of Truth
 
 - **Published numbers:** manuscript tables, with task-specific metric scales explicitly noted above.
-- **Actual reproduced numbers:** generated ~~~results/table2/*/summary.csv~~~ and ~~~metrics.json~~~ plus the matching code revision.
-- **Model hyperparameters:** [~~~configs/model_table2.yaml~~~](../configs/model_table2.yaml).
-- **Data preprocessing:** [~~~preprocessing/PREPROCESSING.md~~~](../preprocessing/PREPROCESSING.md).
+- **Actual reproduced numbers:** generated `results/table2/*/summary.csv` and `metrics.json` plus the matching code revision.
+- **Model hyperparameters:** [`configs/model_table2.yaml`](../configs/model_table2.yaml).
+- **Data preprocessing:** [`preprocessing/PREPROCESSING.md`](../preprocessing/PREPROCESSING.md).
 
 *Update this document when adding a new benchmark or verifying a reproduction run; do not manually overwrite machine-generated results.*
