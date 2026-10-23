@@ -79,7 +79,7 @@ python scripts/restore_t3_metrics.py \
   --annotations data/external/annotations/pbmc_azimuth_predictions.csv
 ~~~
 
-If the validation H5AD files already contain a cell_type or predicted.celltype.l2 column, omit --annotations; the script collects existing obs labels.
+If the dataset YAML defines a non-null external_labels.csv, you can omit --annotations; the script reads that configured CSV. Otherwise, when validation H5AD files contain a cell_type or predicted.celltype.l2 column, omitting --annotations loads those obs labels.
 
 The script checks that at least 90% of validation cells have labels recognized by stage_map and at least two stages are present. It refuses to calculate scores for incompatible labels and prints unmapped annotation names. Lower --min-coverage only if partial coverage is explicitly justified.
 
