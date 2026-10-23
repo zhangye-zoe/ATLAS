@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from atlas.data import Table2Data
 from atlas.early_stopping import split_monitor_report, subset_validation
+from atlas.metrics import labels_to_stages
 from atlas.trainer import infer_validation_t3
 
 
@@ -50,19 +51,20 @@ def test_fixed_partition_is_disjoint_stage_stratified_and_reproducible():
     assert info["report_cells"] == 84
     assert info["checkpoint_selection_uses_reference_labels"] is True
     assert info["training_losses_use_reference_labels"] is False
-    assert set(monitor.val_cell_ids).isdisjoint(report.val_cell_ids)
-    assert set(monitor.labels) == set(report.labels) == set(data.labels)
-    np.testing.assert_array_equal(monitor.val_cell_ids, monitor2.val_cell_ids)
-    np.testing.assert_array_equal(report.val_cell_ids, report2.val_cell_ids)
-    assert data.val_modalities["rna"].shape[0] == 120
+    monitor_known = np.isfinite(labels_to_stages(monitor.labels, monitor.stage_map))
+    report_known = np.isfinite(labels_to_stages(report.labels, report.stage_map))
+    assert not np.any(monitor_known & report_known)
+    assert np.count_nonzero(monitor_known) == 36
+    assert np.count_nonzero(report_known) == 84
+    np.testing.assert_array_equal(monitor.labels, monitor2.labels)
+    np.testing.assert_array_equal(report.labels, report2.labels)
+    np.testing.assert_array_equal(monitor.val_cell_ids, data.val_cell_ids)
+    np.testing.assert_array_equal(report.val_cell_ids, data.val_cell_ids)
+    np.testing.assert_array_equal(
+        monitor.val_modalities["atac"], data.val_modalities["atac"]
+    )
     assert monitor.modalities["rna"].shape[0] == 120
     assert report.modalities["rna"].shape[0] == 120
-    np.testing.assert_array_equal(
-        monitor.val_modalities["atac"],
-        data.val_modalities["atac"][
-            np.array([int(str(v).split("-")[1]) for v in monitor.val_cell_ids])
-        ],
-    )
 
 
 def test_invalid_partition_fails_instead_of_leaking():
@@ -111,6 +113,6 @@ def test_monitor_and_final_use_same_timehead_inference():
         model, report, cfg, torch.device("cpu")
     )
     assert est1 == est2 == "head"
-    assert len(train_t) == len(monitor.val_cell_ids)
-    assert len(test_t) == len(report.val_cell_ids)
+    assert len(train_t) == len(test_t) == 120
+    np.testing.assert_array_equal(train_t, test_t)
     assert np.isfinite(train_t).all() and np.isfinite(test_t).all()
