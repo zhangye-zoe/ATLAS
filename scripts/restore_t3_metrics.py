@@ -143,8 +143,17 @@ def main() -> None:
     results_root = args.results_root or ROOT / "results" / "table2" / cfg["name"]
     output_csv = args.output_csv or ROOT / "data" / "external" / "annotations" / f"{args.dataset}_t3_labels.csv"
 
-    if args.annotations:
-        labels = read_annotation(args.annotations, args.cell_column, label_column)
+    # Prefer the explicitly supplied annotation source; otherwise use the
+    # configured external_labels.csv before falling back to AnnData.obs.
+    configured_csv = (cfg.get("external_labels") or {}).get("csv")
+    annotation_path = args.annotations
+    if annotation_path is None and configured_csv:
+        annotation_path = Path(configured_csv)
+        if not annotation_path.is_absolute():
+            annotation_path = ROOT / annotation_path
+    if annotation_path is not None:
+        labels = read_annotation(annotation_path, args.cell_column, label_column)
+        print(f"Reference annotations: {annotation_path}")
     else:
         labels = annotations_from_validation_obs(split_root, label_column)
     lookup = labels.set_index("cell_id")["label"]
