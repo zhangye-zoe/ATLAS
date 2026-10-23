@@ -73,5 +73,10 @@ evaluation:
   # The historical Table-2 protocol evaluates T3 on validation cells for which both modalities are available.
   # Change to "atac_only" for a stricter missing-target inference test.
   t3_input_mode: paired_fused
+  # T3 evaluation estimator: head (default), graph_peripheral, graph_auto, dpt.
+  # Legacy graph_auto/dpt require scanpy. Do not choose a method based on test scores.
+  # This is independent of t3_input_mode and never changes teacher training.
+  t3_time_mode: head
+  t3_graph_k: 30
   # Pseudotime direction is mathematically sign-ambiguous. This flip is evaluation-only and never used in training.
   orient_time_for_metric: true
