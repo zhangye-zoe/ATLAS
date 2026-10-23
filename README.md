@@ -76,6 +76,8 @@ The HSPC future-state prediction (T4) benchmark is not yet included as an end-to
 
 See [Experimental Results](./docs/RESULTS.md) for the paper-reported reference tables, metric conventions, and reproduction tracking. Generated experiment artifacts are stored locally under `results/`.
 
+For parity analysis with the previous CORAL implementation, see the [legacy T3/T4 code audit](./docs/LEGACY_T3_T4_AUDIT.md). Use `scripts/compare_legacy_t3.py` to compare saved neural-time and graph/DPT candidates without retraining.
+
 ## 📖 Citation
 
 If you find our work useful, please cite:
