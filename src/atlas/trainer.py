@@ -127,6 +127,7 @@ def train_atlas(
     cfg: Dict,
     device: torch.device,
     output_dir: Path,
+    monitor_data: Optional[Table2Data] = None,
 ) -> DynamicCache:
     output_dir.mkdir(parents=True, exist_ok=True)
     train_cfg = cfg["training"]
@@ -159,6 +160,32 @@ def train_atlas(
     history = []
     dynamic: Optional[DynamicCache] = None
     phase3_epoch = 0
+
+    es_cfg = cfg.get("early_stopping") or {}
+    es_enabled = bool(es_cfg.get("enabled", False))
+    if es_enabled and monitor_data is None:
+        raise ValueError("early_stopping.enabled requires a separate monitor validation subset")
+    if not es_enabled and monitor_data is not None:
+        raise ValueError("monitor_data supplied but early_stopping.enabled is false")
+    monitor_stages = None
+    if es_enabled:
+        monitor_stages = labels_to_stages(monitor_data.labels, monitor_data.stage_map)
+        if np.count_nonzero(np.isfinite(monitor_stages)) < 2:
+            raise ValueError("Monitor subset contains too few stage-labeled cells")
+    es_metric = str(es_cfg.get("metric", "POAUC"))
+    if es_enabled and es_metric not in ("POA", "POAUC"):
+        raise ValueError("early_stopping.metric must be POA or POAUC")
+    es_every = int(es_cfg.get("eval_every", 5))
+    es_patience = int(es_cfg.get("patience", 4))
+    es_min_delta = float(es_cfg.get("min_delta", 0.002))
+    es_min_phase3 = int(es_cfg.get("min_phase3_epochs", 10))
+    if es_enabled and (es_every < 1 or es_patience < 1 or es_min_delta < 0):
+        raise ValueError("Invalid early-stopping frequency, patience, or min_delta")
+    best_score = float("-inf")
+    best_info = None
+    bad_phase3_checks = 0
+    monitoring_history = []
+    stop_phase3 = False
 
     for phase, n_epochs in phases:
         for epoch in range(n_epochs):
@@ -331,12 +358,93 @@ def train_atlas(
 
             row = {"phase": phase, "epoch": epoch + 1}
             row.update({k: v / max(n_batches, 1) for k, v in accum.items()})
+            if es_enabled and ((epoch + 1) % es_every == 0 or epoch + 1 == n_epochs):
+                pred_time, _, pred_estimator, _, _, _ = infer_validation_t3(
+                    model, monitor_data, cfg, device
+                )
+                valid_monitor = np.isfinite(monitor_stages) & np.isfinite(pred_time)
+                scored = evaluate_t3(
+                    pred_time[valid_monitor], monitor_stages[valid_monitor],
+                    orient=bool(cfg["evaluation"].get("orient_time_for_metric", True)),
+                )
+                score = float(scored[es_metric])
+                if not np.isfinite(score):
+                    raise RuntimeError(
+                        f"Monitor {es_metric} is nonfinite for {phase} epoch {epoch+1}"
+                    )
+                row["monitor_POA"] = scored["POA"]
+                row["monitor_POAUC"] = scored["POAUC"]
+                improved = score > best_score + es_min_delta
+                if improved:
+                    best_score = score
+                    best_info = {
+                        "phase": phase, "phase_epoch": epoch + 1,
+                        "metric": es_metric, "score": score,
+                        "monitor_POA": float(scored["POA"]),
+                        "monitor_POAUC": float(scored["POAUC"]),
+                        "estimator": pred_estimator,
+                        "monitor_cells": int(valid_monitor.sum()),
+                        "training_reference_labels_used": False,
+                        "selection_reference_labels_used": True,
+                    }
+                    torch.save(
+                        {"model_state": model.state_dict(), "best": best_info},
+                        output_dir / "best_t3.pt",
+                    )
+                if phase == "phase3":
+                    bad_phase3_checks = 0 if improved else bad_phase3_checks + 1
+                    if (epoch + 1 >= es_min_phase3 and
+                            bad_phase3_checks >= es_patience):
+                        stop_phase3 = True
+                monitoring_history.append({
+                    "phase": phase, "epoch": epoch + 1,
+                    "global_epoch": len(history) + 1,
+                    "POA": float(scored["POA"]),
+                    "POAUC": float(scored["POAUC"]),
+                    "best_so_far": float(best_score),
+                    "improved": bool(improved),
+                    "bad_phase3_checks": bad_phase3_checks,
+                })
+                save_json(monitoring_history, output_dir / "t3_monitor_history.json")
+                print(
+                    f"  [monitor] {phase} {epoch+1}/{n_epochs} "
+                    f"POA={scored['POA']:.4f} POAUC={scored['POAUC']:.4f} "
+                    f"best_{es_metric}={best_score:.4f} "
+                    f"patience={bad_phase3_checks}/{es_patience}"
+                )
             history.append(row)
             print(
-                f"[{data.dataset_name} pair={data.paired_ratio:03d}] {phase} "
+                f"[{data.dataset_name} pair={data.paired_ratio:03d}] {phase} 
                 f"{epoch + 1:03d}/{n_epochs:03d} loss={row.get('total', float('nan')):.4f}"
             )
+            if stop_phase3:
+                print(f"  [early-stop] Phase III stopped at epoch {epoch+1}")
+                break
 
+        if es_enabled and n_epochs > 0:
+            torch.save(
+                {"model_state": model.state_dict(),
+                 "phase": phase, "completed_epochs": epoch + 1,
+                 "is_final": not stop_phase3},
+                output_dir / f"checkpoint_{phase}_last.pt",
+            )
+
+    if es_enabled:
+        if best_info is None:
+            raise RuntimeError("No valid checkpoint-monitor evaluation was recorded")
+        best_ckpt = torch.load(output_dir / "best_t3.pt", map_location=device)
+        model.load_state_dict(best_ckpt["model_state"])
+        save_json(
+            {"best": best_info, "early_stopped_phase3": bool(stop_phase3),
+             "patience": es_patience, "min_delta": es_min_delta,
+             "eval_every": es_every,
+             "checkpoint_loaded_for_final_evaluation": "best_t3.pt"},
+            output_dir / "early_stopping_summary.json",
+        )
+        print(
+            f"  [restore-best] {best_info['phase']} epoch "
+            f"{best_info['phase_epoch']} {es_metric}={best_info['score']:.4f}"
+        )
     dynamic = build_dynamic_cache(model, data, cfg, device)
     torch.save(
         {
@@ -350,6 +458,108 @@ def train_atlas(
     )
     save_json(history, output_dir / "training_history.json")
     return dynamic
+
+
+@torch.no_grad()
+def infer_validation_t3(
+    model: ATLAS, data: Table2Data, cfg: Dict, device: torch.device,
+) -> Tuple[np.ndarray, np.ndarray, str, str, Optional[Dict], str]:
+    """Compute EXACTLY the same label-free T3 prediction for monitoring and report.
+
+    No reference stage or annotation enters this function. For graph-based
+    estimators the inference cohort determines the unsupervised kNN graph.
+    """
+    model.eval()
+    val = data.val_modalities
+    n = len(data.val_cell_ids)
+    eval_cfg = cfg["evaluation"]
+    x_atac = torch.as_tensor(val["atac"], device=device)
+    x_rna = torch.as_tensor(val["rna"], device=device)
+    # Source-only tensors reused if T3 is configured as ATAC-only.
+    x_src = {
+        "atac": x_atac,
+        "rna": torch.zeros((n, val["rna"].shape[1]), device=device),
+    }
+    m_src = {
+        "atac": torch.ones(n, device=device),
+        "rna": torch.zeros(n, device=device),
+    }
+
+    # ------------------------------------------------------------------ T3
+    mode = str(eval_cfg.get("t3_input_mode", "paired_fused"))
+    if mode == "paired_fused":
+        x_t3 = {"atac": x_atac, "rna": x_rna}
+        m_t3 = {"atac": torch.ones(n, device=device), "rna": torch.ones(n, device=device)}
+    elif mode == "atac_only":
+        x_t3, m_t3 = x_src, m_src
+    else:
+        raise ValueError(f"Unknown evaluation.t3_input_mode={mode}")
+    t3_out = model(x_t3, m_t3, sample=False)
+    t3_time_head = t3_out["time"].cpu().numpy()
+    h_fused = t3_out["h"].cpu().numpy()
+
+    # T3 estimator selection is independent of training loss. The consensus
+    # branch performs rank-based fusion WITHOUT validation stage labels.
+    t3_estimator = str(eval_cfg.get("t3_time_mode", "head"))
+    t3_fusion = None
+    if t3_estimator == "head":
+        t3_time = t3_time_head
+        t3_estimator_source = "trained TimeHead"
+    elif t3_estimator == "consensus":
+        from .temporal import build_temporal_teacher, fuse_time_candidates_local, knn_graph
+        tc = cfg["temporal"]
+        val_teacher = build_temporal_teacher(
+            h=h_fused,
+            shared={name: t3_out["enc"][name]["mu_shared"].cpu().numpy()
+                    for name in model.modality_names},
+            masks={name: m_t3[name].cpu().numpy() for name in model.modality_names},
+            k_neighbors=int(tc["k_neighbors"]),
+            tau=float(tc["tau"]),
+            lambda_sm=float(tc["lambda_sm"]),
+            lambda_mv=float(tc["lambda_mv"]),
+            lambda_sp=float(tc["lambda_sp"]),
+            target_std=float(tc["target_std"]),
+            method="local_consensus",
+            consensus_tau=float(tc.get("consensus_tau", 0.15)),
+            lambda_agreement=float(tc.get("lambda_agreement", 3.0)),
+            lambda_local_smooth=float(tc.get("lambda_local_smooth", 1.0)),
+        )
+        # Head remains a candidate, but cannot determine its own reliability
+        # using validation labels. Each estimator is sign-aligned to graph.
+        t3_candidates = {"head": t3_time_head, **val_teacher.candidates}
+        t3_time, t3_conf, t3_weights = fuse_time_candidates_local(
+            t3_candidates,
+            val_teacher.knn_idx,
+            tau=float(tc.get("consensus_tau", 0.15)),
+            lambda_agreement=float(tc.get("lambda_agreement", 3.0)),
+            lambda_local_smooth=float(tc.get("lambda_local_smooth", 1.0)),
+            anchor="graph",
+        )
+        t3_fusion = {
+            "candidate_weights": t3_weights,
+            "mean_confidence": float(t3_conf.mean()),
+            "input_mode": mode,
+            "reference_labels_used_in_fusion": False,
+        }
+        t3_estimator_source = "label-free local consensus of head/graph/diff/attr"
+    else:
+        from .legacy_t3 import get_t3_candidates
+        if t3_estimator == "graph_root":
+            raise ValueError(
+                "T3 graph_root uses reference labels to choose a root; "
+                "for label-free Table-2 use graph_auto or graph_peripheral. "
+                "Run scripts/compare_legacy_t3.py for labeled-root diagnostics."
+            )
+        candidates, sources = get_t3_candidates(
+            h_fused,
+            t3_time_head,
+            modes=[t3_estimator],
+            graph_k=int(eval_cfg.get("t3_graph_k", 30)),
+        )
+        t3_time = candidates[t3_estimator]
+        t3_estimator_source = sources[t3_estimator]
+
+    return t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode
 
 
 @torch.no_grad()
@@ -426,90 +636,11 @@ def evaluate_table2(
     x_rna = torch.as_tensor(val["rna"], device=device)
     zr = model.encode_modality_only("rna", x_rna).cpu().numpy()
 
-    # Source-only tensors reused if T3 is configured as ATAC-only.
-    x_src = {
-        "atac": x_atac,
-        "rna": torch.zeros((n, val["rna"].shape[1]), device=device),
-    }
-    m_src = {
-        "atac": torch.ones(n, device=device),
-        "rna": torch.zeros(n, device=device),
-    }
-
-    # ------------------------------------------------------------------ T3
-    mode = str(eval_cfg.get("t3_input_mode", "paired_fused"))
-    if mode == "paired_fused":
-        x_t3 = {"atac": x_atac, "rna": x_rna}
-        m_t3 = {"atac": torch.ones(n, device=device), "rna": torch.ones(n, device=device)}
-    elif mode == "atac_only":
-        x_t3, m_t3 = x_src, m_src
-    else:
-        raise ValueError(f"Unknown evaluation.t3_input_mode={mode}")
-    t3_out = model(x_t3, m_t3, sample=False)
-    t3_time_head = t3_out["time"].cpu().numpy()
-    h_fused = t3_out["h"].cpu().numpy()
-
-    # T3 estimator selection is independent of training loss. The consensus
-    # branch performs rank-based fusion WITHOUT validation stage labels.
-    t3_estimator = str(eval_cfg.get("t3_time_mode", "head"))
-    t3_fusion = None
-    if t3_estimator == "head":
-        t3_time = t3_time_head
-        t3_estimator_source = "trained TimeHead"
-    elif t3_estimator == "consensus":
-        from .temporal import build_temporal_teacher, fuse_time_candidates_local, knn_graph
-        tc = cfg["temporal"]
-        val_teacher = build_temporal_teacher(
-            h=h_fused,
-            shared={name: t3_out["enc"][name]["mu_shared"].cpu().numpy()
-                    for name in model.modality_names},
-            masks={name: m_t3[name].cpu().numpy() for name in model.modality_names},
-            k_neighbors=int(tc["k_neighbors"]),
-            tau=float(tc["tau"]),
-            lambda_sm=float(tc["lambda_sm"]),
-            lambda_mv=float(tc["lambda_mv"]),
-            lambda_sp=float(tc["lambda_sp"]),
-            target_std=float(tc["target_std"]),
-            method="local_consensus",
-            consensus_tau=float(tc.get("consensus_tau", 0.15)),
-            lambda_agreement=float(tc.get("lambda_agreement", 3.0)),
-            lambda_local_smooth=float(tc.get("lambda_local_smooth", 1.0)),
-        )
-        # Head remains a candidate, but cannot determine its own reliability
-        # using validation labels. Each estimator is sign-aligned to graph.
-        t3_candidates = {"head": t3_time_head, **val_teacher.candidates}
-        t3_time, t3_conf, t3_weights = fuse_time_candidates_local(
-            t3_candidates,
-            val_teacher.knn_idx,
-            tau=float(tc.get("consensus_tau", 0.15)),
-            lambda_agreement=float(tc.get("lambda_agreement", 3.0)),
-            lambda_local_smooth=float(tc.get("lambda_local_smooth", 1.0)),
-            anchor="graph",
-        )
-        t3_fusion = {
-            "candidate_weights": t3_weights,
-            "mean_confidence": float(t3_conf.mean()),
-            "input_mode": mode,
-            "reference_labels_used_in_fusion": False,
-        }
+    t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode = (
+        infer_validation_t3(model, data, cfg, device)
+    )
+    if t3_fusion is not None:
         save_json(t3_fusion, output_dir / "T3_consensus_diagnostics.json")
-        t3_estimator_source = "label-free local consensus of head/graph/diff/attr"
-    else:
-        from .legacy_t3 import get_t3_candidates
-        if t3_estimator == "graph_root":
-            raise ValueError(
-                "T3 graph_root uses reference labels to choose a root; "
-                "for label-free Table-2 use graph_auto or graph_peripheral. "
-                "Run scripts/compare_legacy_t3.py for labeled-root diagnostics."
-            )
-        candidates, sources = get_t3_candidates(
-            h_fused,
-            t3_time_head,
-            modes=[t3_estimator],
-            graph_k=int(eval_cfg.get("t3_graph_k", 30)),
-        )
-        t3_time = candidates[t3_estimator]
-        t3_estimator_source = sources[t3_estimator]
 
     if data.labels is None:
         t3 = {
