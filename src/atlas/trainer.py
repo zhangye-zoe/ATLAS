@@ -666,11 +666,19 @@ def evaluate_table2(
                 "label": np.asarray(data.labels)[valid],
             }).to_csv(output_dir / "T3_stage_reference.csv", index=False)
 
-            t3 = evaluate_t3(
-                t3_time[valid],
-                stages[valid],
-                orient=bool(eval_cfg.get("orient_time_for_metric", True)),
-            )
+            # Default legacy evaluation chooses pseudotime sign at scoring.
+            # Under checkpoint selection, freeze sign from the monitor labels
+            # BEFORE accessing report labels, so held-out reference stages
+            # cannot also choose the reported time orientation.
+            fixed_flip = eval_cfg.get("t3_fixed_orientation_flip", None)
+            if fixed_flip is None:
+                t3 = evaluate_t3(
+                    t3_time[valid], stages[valid],
+                    orient=bool(eval_cfg.get("orient_time_for_metric", True)),
+                )
+            else:
+                oriented = 1.0 - t3_time[valid] if bool(fixed_flip) else t3_time[valid]
+                t3 = evaluate_t3(oriented, stages[valid], orient=False)
             t3["n_eval"] = int(valid.sum())
             t3["reference"] = "external stage_map labels (0-3), not continuous biological time"
 
@@ -692,8 +700,12 @@ def evaluate_table2(
             "T3_time_estimator": t3_estimator,
             "T3_time_estimator_source": t3_estimator_source,
             "T3_fusion_diagnostics": t3_fusion,
-            "T3_reference_orientation_only_at_evaluation": bool(
-                eval_cfg.get("orient_time_for_metric", True)
+            "T3_reference_orientation_only_at_evaluation": (
+                eval_cfg.get("t3_fixed_orientation_flip") is None
+                and bool(eval_cfg.get("orient_time_for_metric", True))
+            ),
+            "T3_orientation_fixed_from_monitor_labels": (
+                eval_cfg.get("t3_fixed_orientation_flip", None)
             ),
         },
     }
