@@ -496,11 +496,14 @@ def infer_validation_t3(
         raise ValueError(f"Unknown evaluation.t3_input_mode={mode}")
     t3_out = model(x_t3, m_t3, sample=False)
     t3_time_head = t3_out["time"].cpu().numpy()
-    h_fused = t3_out["h"].cpu().numpy()
 
     # T3 estimator selection is independent of training loss. The consensus
     # branch performs rank-based fusion WITHOUT validation stage labels.
     t3_estimator = str(eval_cfg.get("t3_time_mode", "head"))
+    # TimeHead-only inference needs no latent representation. This also keeps
+    # inference compatible with lightweight time-only test models.
+    if t3_estimator != "head":
+        h_fused = t3_out["h"].cpu().numpy()
     t3_fusion = None
     if t3_estimator == "head":
         t3_time = t3_time_head
