@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 
 # Allow running directly from repository root without installation.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +19,8 @@ if str(SRC) not in sys.path:
 from atlas.data import load_table2_split
 from atlas.early_stopping import split_monitor_report
 from atlas.model import ATLAS
-from atlas.trainer import evaluate_table2, train_atlas
+from atlas.trainer import evaluate_table2, infer_validation_t3, train_atlas
+from atlas.metrics import labels_to_stages, pairwise_ordering_accuracy
 from atlas.utils import get_device, load_yaml, save_json, seed_everything
 
 
@@ -99,11 +101,40 @@ def main():
         dynamic = train_atlas(
             model, data, model_cfg, device, run_dir, monitor_data=monitor_data,
         )
-        metrics = evaluate_table2(model, report_data, dynamic, model_cfg, device, run_dir)
+        scoring_cfg = model_cfg
+        monitor_flip = None
+        if partition_info is not None:
+            # Use the selected checkpoint to infer time on ALL unlabeled cells.
+            # Determine a single orientation from MONITOR labels only.
+            # Report labels never choose checkpoint nor sign.
+            monitor_time, _, _, _, _, _ = infer_validation_t3(
+                model, monitor_data, model_cfg, device
+            )
+            monitor_stages = labels_to_stages(
+                monitor_data.labels, monitor_data.stage_map
+            )
+            monitor_valid = np.isfinite(monitor_stages) & np.isfinite(monitor_time)
+            direct = pairwise_ordering_accuracy(
+                monitor_time[monitor_valid], monitor_stages[monitor_valid]
+            )
+            reverse = pairwise_ordering_accuracy(
+                (1.0 - monitor_time[monitor_valid]), monitor_stages[monitor_valid]
+            )
+            monitor_flip = bool(
+                model_cfg["evaluation"].get("orient_time_for_metric", True)
+                and np.isfinite(reverse) and reverse > direct
+            )
+            scoring_cfg = copy.deepcopy(model_cfg)
+            scoring_cfg["evaluation"]["t3_fixed_orientation_flip"] = monitor_flip
+
+        metrics = evaluate_table2(
+            model, report_data, dynamic, scoring_cfg, device, run_dir
+        )
         if partition_info is not None:
             metrics["protocol"]["T3_evaluation_partition"] = (
-                "held-out reporting subset; disjoint from early-stop monitor"
+                "stage-label holdout; 30% monitor / 70% report on SAME unlabeled cell cohort"
             )
+            metrics["protocol"]["T3_monitor_orientation_flip"] = monitor_flip
             metrics["protocol"]["T3_monitor_cells"] = partition_info["monitor_cells"]
             metrics["protocol"]["T3_report_cells"] = partition_info["report_cells"]
             metrics["protocol"]["T3_supervised_checkpoint_selection"] = True
