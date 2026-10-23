@@ -68,6 +68,8 @@ For a quick pipeline check:
 python experiments/run_table2.py --dataset pbmc --pair-ratios 0 --device cpu --quick
 ```
 
+**Missing PBMC/BMMC T3 metrics?** See [T3 reference annotations and post-hoc evaluation](./docs/T3_ANNOTATIONS.md) to obtain validated cell-type labels and rescore saved latent times without retraining.
+
 The HSPC future-state prediction (T4) benchmark is not yet included as an end-to-end experiment in this source package.
 
 ## 📈 Experimental Results
