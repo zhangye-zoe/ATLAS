@@ -1,0 +1,101 @@
+seed: 1234
+
+device: cuda
+
+model:
+  shared_dim: 32
+  private_dim: 16
+  encoder_hidden: [256, 128]
+  decoder_hidden: [128, 256]
+  dropout: 0.1
+
+training:
+  batch_size: 256
+  phase1_epochs: 80
+  phase2_epochs: 60
+  phase3_epochs: 40
+  time_warmup_epochs: 20
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  grad_clip: 5.0
+  lag_warmup_epochs: 5
+  refresh_dynamic_every: 5
+
+loss:
+  lambda_rec: 1.0
+  lambda_con: 1.0
+  lambda_kl: 0.001
+  lambda_mmd: 0.05
+  lambda_ot: 0.20
+  lambda_bio: 0.50
+  lambda_time: 1.0
+  lambda_lag: 0.30
+  lambda_pred: 1.0
+  lambda_time_reg: 0.10
+  lambda_lag_smooth: 0.10
+  lambda_unpaired_lag: 1.0
+  lambda_unpaired_pred: 1.0
+
+alignment:
+  ot_epsilon: 0.05
+  ot_iterations: 30
+  bio_k: 10
+  max_ot_cells_per_modality: 256
+
+# Reliability-guided temporal teacher.
+temporal:
+  k_neighbors: 15
+  tau: 0.85
+  lambda_sm: 1.0
+  lambda_mv: 1.0
+  lambda_sp: 1.0
+  target_std: 0.20
+  teacher_pair_samples: 4096
+  teacher_ema: 0.8
+  # Experimental: sample-wise reliability fusion. Never uses stage labels.
+  fusion_method: local_consensus
+  consensus_tau: 0.15
+  lambda_agreement: 3.0
+  lambda_local_smooth: 1.0
+
+lag:
+  bins: 4
+  ot_epsilon: 0.05
+  ot_iterations: 30
+  alpha_time: 0.50
+  alpha_latent: 0.25
+  temporal_window: 0.35
+  local_k: 32
+
+# Table 2 protocols.
+evaluation:
+  # Historical CORAL/scMRDR-style T1: ATAC-only predicted RNA vs true RNA,
+  # one joint PCA, then FOSCTTM/PED in that shared PCA space.
+  t1_pca_components: 30
+  # T2 strictly feeds ATAC only; RNA stays outside the model until metrics are computed.
+  t2_source: atac
+  t2_target: rna
+  # The historical Table-2 protocol evaluates T3 on validation cells for which both modalities are available.
+  # Change to "atac_only" for a stricter missing-target inference test.
+  t3_input_mode: paired_fused
+  # T3 evaluation estimator: head (default), graph_peripheral, graph_auto, dpt.
+  # Legacy graph_auto/dpt require scanpy. Do not choose a method based on test scores.
+  # This is independent of t3_input_mode and never changes teacher training.
+  # Label-free ensemble of head and graph/diff/attr pseudotime.
+  t3_time_mode: consensus
+  t3_graph_k: 30
+  # Pseudotime direction is mathematically sign-ambiguous. This flip is evaluation-only and never used in training.
+  orient_time_for_metric: true
+
+# Opt-in supervised checkpoint selection (never used in model losses).
+# Use an internal stage-stratified monitor subset of validation cells.
+# Final T3 metrics are on a DISJOINT held-out subset, so do not directly
+# compare their n_eval / metrics to the 1224-cell historical protocol.
+early_stopping:
+  enabled: true
+  monitor_fraction: 0.30
+  metric: POAUC
+  eval_every: 5
+  patience: 4
+  min_delta: 0.002
+  min_phase3_epochs: 10
