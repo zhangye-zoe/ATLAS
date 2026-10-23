@@ -431,8 +431,32 @@ def evaluate_table2(
     else:
         raise ValueError(f"Unknown evaluation.t3_input_mode={mode}")
     t3_out = model(x_t3, m_t3, sample=False)
-    t3_time = t3_out["time"].cpu().numpy()
+    t3_time_head = t3_out["time"].cpu().numpy()
     h_fused = t3_out["h"].cpu().numpy()
+
+    # Historical CORAL sometimes reported DPT/graph-geodesic pseudotime
+    # instead of TimeHead. Keep TimeHead as the default to avoid silently
+    # changing existing Table-2 numbers. Select explicitly in evaluation YAML.
+    t3_estimator = str(eval_cfg.get("t3_time_mode", "head"))
+    if t3_estimator == "head":
+        t3_time = t3_time_head
+        t3_estimator_source = "trained TimeHead"
+    else:
+        from .legacy_t3 import get_t3_candidates
+        if t3_estimator == "graph_root":
+            raise ValueError(
+                "T3 graph_root uses reference labels to choose a root; "
+                "for label-free Table-2 use graph_auto or graph_peripheral. "
+                "Run scripts/compare_legacy_t3.py for labeled-root diagnostics."
+            )
+        candidates, sources = get_t3_candidates(
+            h_fused,
+            t3_time_head,
+            modes=[t3_estimator],
+            graph_k=int(eval_cfg.get("t3_graph_k", 30)),
+        )
+        t3_time = candidates[t3_estimator]
+        t3_estimator_source = sources[t3_estimator]
 
     if data.labels is None:
         t3 = {
@@ -481,6 +505,8 @@ def evaluate_table2(
             "T1_fos_denominator": "N targets per query, strict distance < true-pair distance (historical CORAL implementation)",
             "T2": "ATAC-only model input; true RNA used after inference for metrics only",
             "T3_input_mode": mode,
+            "T3_time_estimator": t3_estimator,
+            "T3_time_estimator_source": t3_estimator_source,
             "T3_reference_orientation_only_at_evaluation": bool(
                 eval_cfg.get("orient_time_for_metric", True)
             ),
@@ -498,6 +524,7 @@ def evaluate_table2(
         t1_true_pca=t1_true_pca,
         t1_pred_pca=t1_pred_pca,
         time=t3_time,
+        time_head=t3_time_head,
     )
     if data.labels is not None:
         arrays["labels"] = np.asarray(data.labels, dtype=str)
