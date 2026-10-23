@@ -91,7 +91,10 @@ def main():
         with np.load(file, allow_pickle=False) as values:
             ids = values["cell_ids"].astype(str)
             h = np.asarray(values["h_fused"], dtype=np.float32)
-            time = np.asarray(values["time"], dtype=np.float32)
+            time = np.asarray(
+                values["time_head"] if "time_head" in values.files else values["time"],
+                dtype=np.float32,
+            )
             # External annotations take precedence; fall back to saved labels only when available.
             labels = (np.asarray(values["labels"]).astype(str)
                       if "labels" in values.files else None)
@@ -174,7 +177,7 @@ def main():
     pd.DataFrame(rows).to_csv(csv_path, index=False)
     protocol = {
         "purpose": "post-hoc trajectory estimator diagnostic, NOT automatic test-model selection",
-        "source": "saved predictions.npz: h_fused and time",
+        "source": "saved predictions.npz: h_fused and time_head (falling back to time for older runs)",
         "annotation_source": str(source) if source else None,
         "cell_set": args.cell_set,
         "intersection_size": len(common),
