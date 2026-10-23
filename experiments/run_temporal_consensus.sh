@@ -3,7 +3,9 @@
 #   QUICK=1 PAIR_RATIOS="0" bash experiments/run_temporal_consensus.sh pbmc cuda:0
 #   PAIR_RATIOS="0 20 40 60 80 100" SEEDS="1234 2022 3407" \
 #     bash experiments/run_temporal_consensus.sh pbmc cuda:0
-# ARMS="consensus" skips training the baseline. Set OUTPUT_PARENT to a fresh path.
+# ARMS="consensus" runs only the proposed model.
+# Optional full 2x2 ablation: ARMS="baseline inference_only teacher_only consensus".
+# Set OUTPUT_PARENT to a fresh path for each run.
 set -euo pipefail
 
 DATASET="${1:-pbmc}"
@@ -36,7 +38,7 @@ if not torch.cuda.is_available():
 PY
 fi
 for arm in "${ARM_ARR[@]}"; do
-  case "$arm" in baseline|consensus) ;; *) echo "invalid arm=$arm" >&2; exit 2;; esac
+  case "$arm" in baseline|inference_only|teacher_only|consensus) ;; *) echo "invalid arm=$arm" >&2; exit 2;; esac
 done
 
 printf 'Dataset=%s; device=%s; ratios=%s; seeds=%s; arms=%s\n' \
@@ -48,7 +50,7 @@ for seed in "${SEED_ARR[@]}"; do
     exit 2
   fi
   for arm in "${ARM_ARR[@]}"; do
-    if [[ "$arm" == baseline ]]; then
+    if [[ "$arm" == baseline || "$arm" == inference_only ]]; then
       SOURCE_CFG="$ROOT/configs/model_table2.yaml"
     else
       SOURCE_CFG="$ROOT/configs/model_table2_temporal_consensus.yaml"
@@ -62,12 +64,19 @@ for seed in "${SEED_ARR[@]}"; do
     fi
     mkdir -p "$OUT_ROOT"
     CFG="$OUT_ROOT/config_used.yaml"
-    python - "$SOURCE_CFG" "$CFG" "$seed" <<'PY'
+    python - "$SOURCE_CFG" "$CFG" "$seed" "$arm" <<'PY'
 import sys, yaml
-source, target, seed = sys.argv[1:4]
+source, target, seed, arm = sys.argv[1:5]
 with open(source, encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 cfg["seed"] = int(seed)
+# The extra arms isolate the source of any gain (training vs inference):
+# baseline=global/head, inference_only=global/consensus,
+# teacher_only=local/head, consensus=local/consensus.
+if arm == "inference_only":
+    cfg["evaluation"]["t3_time_mode"] = "consensus"
+elif arm == "teacher_only":
+    cfg["evaluation"]["t3_time_mode"] = "head"
 with open(target, "w", encoding="utf-8") as f:
     yaml.safe_dump(cfg, f, sort_keys=False)
 PY
