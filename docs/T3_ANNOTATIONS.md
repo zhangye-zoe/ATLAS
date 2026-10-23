@@ -52,6 +52,14 @@ write.csv(ann,
           row.names = FALSE)
 ~~~
 
+Alternatively, generate the reference label CSV directly from the original 10x Multiome H5 using the provided R helper (requires Seurat, Azimuth, and its PBMC reference):
+
+~~~bash
+Rscript scripts/annotate_pbmc_azimuth.R \
+  data/raw/PBMC/pbmc_granulocyte_sorted_10k_filtered_feature_bc_matrix.h5 \
+  data/external/annotations/pbmc_azimuth_predictions.csv
+~~~
+
 Check that barcodes correspond exactly to the ATLAS processed data. Avoid guessing cell types or matching cells by row order. Record the Azimuth reference version and annotation procedure.
 
 ## 3. Compute T3 without retraining
