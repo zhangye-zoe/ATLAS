@@ -1,9 +1,9 @@
-"""Leakage-aware stage-stratified T3 selection/held-out evaluation partition.
+"""Stage-stratified, label-masked T3 selection and held-out evaluation.
 
-Only validation reference stages are used for the partition and monitoring; they
-never enter ATLAS reconstruction/alignment/temporal teacher losses. Selection
-by stage labels makes this a *supervised checkpoint-selection protocol*, not
-label-free model selection. Final T3 must be reported on held-out stage labels.
+Only reference-stage *labels* are partitioned, not unlabeled validation cells.
+Both subsets use the same full cohort for transductive graph-time inference,
+but disjoint monitor vs reporting annotations. Selection by stage labels is a
+supervised checkpoint-selection protocol, not label-free model selection.
 """
 from __future__ import annotations
 
@@ -34,11 +34,11 @@ def subset_validation(data: Table2Data, indices: np.ndarray) -> Table2Data:
 def split_monitor_report(
     data: Table2Data, monitor_fraction: float = 0.30, seed: int = 1234
 ) -> Tuple[Table2Data, Table2Data, Dict]:
-    """Stratify reference-labeled validation cells into selection vs report.
+    """Create disjoint label masks with the same full transductive cell cohort.
 
-    Every stage must have at least two cells, so both partitions contain it.
-    Unknown stage labels are retained in the report subset, never in selection.
-    The same seed and data split produce identical partitions across arms.
+    Every stage must have at least two cells. All cells' UNLABELED modality
+    profiles remain available to both inferential views; only stage labels
+    are withheld on the complementary subset.
     """
     if data.labels is None:
         raise ValueError("T3 early stopping requires independent reference stage labels")
@@ -81,8 +81,17 @@ def split_monitor_report(
     if len(set(monitor_ids) & set(report_ids)):
         raise AssertionError("Duplicate cell IDs occur across evaluation partitions")
 
+    hidden_label = "__t3_heldout_label__"
+    if hidden_label in data.stage_map:
+        raise ValueError("Reserved label sentinel conflicts with stage_map")
+    monitor_labels = np.asarray(data.labels, dtype=object).copy()
+    report_labels = np.asarray(data.labels, dtype=object).copy()
+    monitor_labels[report_idx] = hidden_label
+    report_labels[monitor_idx] = hidden_label
+
     info = {
-        "policy": "stage-stratified fixed selection/report holdout",
+        "policy": "stage-stratified disjoint labels; common transductive cell cohort",
+        "unlabeled_validation_inputs_shared_across_partitions": True,
         "checkpoint_selection_uses_reference_labels": True,
         "training_losses_use_reference_labels": False,
         "monitor_fraction": float(monitor_fraction),
@@ -95,7 +104,7 @@ def split_monitor_report(
         "report_cell_ids": report_ids.tolist(),
     }
     return (
-        subset_validation(data, monitor_idx),
-        subset_validation(data, report_idx),
+        replace(data, labels=monitor_labels),
+        replace(data, labels=report_labels),
         info,
     )
