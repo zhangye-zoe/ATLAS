@@ -201,8 +201,15 @@ def time_distillation_loss(
     h: torch.Tensor,
     teacher_pairs: torch.Tensor | None = None,
     target_std: float = 0.20,
+    confidence: torch.Tensor | None = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    distill = F.mse_loss(pred_time, teacher_time)
+    if confidence is None:
+        distill = F.mse_loss(pred_time, teacher_time)
+    else:
+        if confidence.shape != pred_time.shape:
+            raise ValueError("Temporal confidence must match prediction shape")
+        w = confidence.detach().clamp(0.0, 1.0)
+        distill = (w * (pred_time - teacher_time).square()).sum() / w.sum().clamp_min(1e-8)
     # Smoothness in latent kNN is injected through sampled pairs when provided;
     # pairwise ranking also makes the learned head retain teacher ordering.
     reg = F.relu(pred_time.new_tensor(target_std) - pred_time.std())
@@ -212,7 +219,12 @@ def time_distillation_loss(
         keep = sign != 0
         if keep.any():
             margin = 0.02
-            reg = reg + F.relu(margin - sign[keep] * (pred_time[i[keep]] - pred_time[j[keep]])).mean()
+            pair_loss = F.relu(margin - sign[keep] * (pred_time[i[keep]] - pred_time[j[keep]]))
+            if confidence is None:
+                reg = reg + pair_loss.mean()
+            else:
+                pair_w = w[i[keep]] * w[j[keep]]
+                reg = reg + (pair_loss * pair_w).sum() / pair_w.sum().clamp_min(1e-8)
     return distill, reg
 
 
