@@ -10,10 +10,10 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from atlas.data import Table2Data
+from atlas.data import Standardizer, Table2Data
 from atlas.early_stopping import split_monitor_report, subset_validation
 from atlas.metrics import labels_to_stages
-from atlas.trainer import infer_validation_t3
+from atlas.trainer import evaluate_table2, infer_validation_t3
 
 
 def toy_table(n=120):
@@ -151,3 +151,40 @@ def test_final_artifact_requires_h_but_head_monitor_does_not():
         infer_validation_t3(
             model, data, cfg, torch.device("cpu"), return_latent=True,
         )
+
+
+class ToyFullEvaluationModel(ToyWithLatentModel):
+    def predict_from_source(self, source, target, x):
+        assert (source, target) == ("atac", "rna")
+        return x * 0.9
+
+    def encode_modality_only(self, modality, x):
+        return x[:, :2]
+
+
+def test_evaluate_table2_writes_fused_latent_predictions_npz(tmp_path):
+    # Regression: previous refactor raised NameError on h_fused *after*
+    # writing T1/T2/T3 metrics, leaving a partially evaluated run.
+    data = toy_table()
+    data.standardizers = {
+        "rna": Standardizer(
+            mean=np.zeros(4, dtype=np.float32),
+            std=np.ones(4, dtype=np.float32),
+        )
+    }
+    cfg = {"seed": 1234, "evaluation": {
+        "t1_pca_components": 2,
+        "t3_input_mode": "paired_fused",
+        "t3_time_mode": "head",
+        "orient_time_for_metric": True,
+    }}
+    metrics = evaluate_table2(
+        ToyFullEvaluationModel(), data, None, cfg, torch.device("cpu"), tmp_path,
+    )
+    assert metrics["T3"]["n_eval"] == 120
+    prediction_file = tmp_path / "predictions.npz"
+    assert prediction_file.is_file()
+    with np.load(prediction_file, allow_pickle=False) as prediction:
+        assert prediction["h_fused"].shape == (120, 2)
+        assert prediction["time"].shape == (120,)
+        assert prediction["time_head"].shape == (120,)
