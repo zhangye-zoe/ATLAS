@@ -36,9 +36,9 @@ def split_monitor_report(
 ) -> Tuple[Table2Data, Table2Data, Dict]:
     """Create disjoint label masks with the same full transductive cell cohort.
 
-    Every stage must have at least two cells. All cells' UNLABELED modality
-    profiles remain available to both inferential views; only stage labels
-    are withheld on the complementary subset.
+    Singleton reference stages are reserved for reporting only; all cells'
+    UNLABELED modalities remain available to both inferential views, and
+    only stage labels are withheld on the complementary subset.
     """
     if data.labels is None:
         raise ValueError("T3 early stopping requires independent reference stage labels")
@@ -57,13 +57,13 @@ def split_monitor_report(
     stage_counts = {}
     for stage in unique:
         group = valid[stages[valid] == stage].copy()
-        if len(group) < 2:
-            raise ValueError(
-                f"Stage {stage} has only {len(group)} cell(s); "
-                "cannot create selection and held-out subsets without leakage"
-            )
         rng.shuffle(group)
-        n_select = int(np.clip(round(monitor_fraction * len(group)), 1, len(group) - 1))
+        # A singleton cannot be assigned to both partitions. Never put it
+        # into selection; reserve it for an unbiased report instead.
+        n_select = (
+            int(np.clip(round(monitor_fraction * len(group)), 1, len(group) - 1))
+            if len(group) >= 2 else 0
+        )
         monitored.extend(group[:n_select].tolist())
         stage_counts[str(int(stage))] = {
             "all": int(len(group)), "monitor": n_select,
@@ -72,6 +72,12 @@ def split_monitor_report(
 
     monitor_idx = np.sort(np.asarray(monitored, dtype=np.int64))
     report_idx = np.setdiff1d(np.arange(len(stages)), monitor_idx)
+    if (len(np.unique(stages[monitor_idx])) < 2
+            or len(np.unique(stages[np.intersect1d(report_idx, valid)])) < 2):
+        raise ValueError(
+            "Both reference-label partitions must contain >=2 known stages; "
+            "inspect stage counts or increase monitor_fraction"
+        )
     if len(np.intersect1d(monitor_idx, report_idx)):
         raise AssertionError("Checkpoint-selection/report cell leakage detected")
 
