@@ -156,6 +156,8 @@ class TemporalTeacher:
     risks: Dict[str, Dict[str, float]]
     weights: Dict[str, float]
     knn_idx: np.ndarray
+    confidence: Optional[np.ndarray] = None
+    method: str = "global"
 
 
 def build_temporal_teacher(
@@ -168,6 +170,10 @@ def build_temporal_teacher(
     lambda_mv: float = 1.0,
     lambda_sp: float = 1.0,
     target_std: float = 0.20,
+    method: str = "global",
+    consensus_tau: float = 0.15,
+    lambda_agreement: float = 3.0,
+    lambda_local_smooth: float = 1.0,
 ) -> TemporalTeacher:
     graph = graph_pseudotime(h, k_neighbors)
     diff = diffusion_pseudotime(h, graph, k_neighbors)
@@ -184,12 +190,103 @@ def build_temporal_teacher(
         risks[name] = {"smooth": r_sm, "modality": r_mv, "spread": r_sp}
         total_risk[name] = lambda_sm * r_sm + lambda_mv * r_mv + lambda_sp * r_sp
 
-    keys = list(candidates)
-    raw = np.asarray([np.exp(-total_risk[k] / max(tau, 1e-6)) for k in keys], dtype=np.float64)
-    raw /= raw.sum() if raw.sum() > 0 else 1.0
-    weights = {k: float(w) for k, w in zip(keys, raw)}
-    teacher = np.zeros(h.shape[0], dtype=np.float64)
-    for k in keys:
-        teacher += weights[k] * rank01(candidates[k])
-    teacher = normalize01(teacher)
-    return TemporalTeacher(teacher, candidates, risks, weights, knn_idx)
+    if method == "global":
+        # Preserve the published/refactored baseline exactly.
+        keys = list(candidates)
+        raw = np.asarray([np.exp(-total_risk[k] / max(tau, 1e-6)) for k in keys], dtype=np.float64)
+        raw /= raw.sum() if raw.sum() > 0 else 1.0
+        weights = {k: float(w) for k, w in zip(keys, raw)}
+        teacher = np.zeros(h.shape[0], dtype=np.float64)
+        for k in keys:
+            teacher += weights[k] * rank01(candidates[k])
+        teacher = normalize01(teacher)
+        return TemporalTeacher(teacher, candidates, risks, weights, knn_idx, method=method)
+    if method != "local_consensus":
+        raise ValueError(f"Unknown temporal fusion method: {method}")
+
+    teacher, confidence, weights = fuse_time_candidates_local(
+        candidates,
+        knn_idx,
+        tau=consensus_tau,
+        lambda_agreement=lambda_agreement,
+        lambda_local_smooth=lambda_local_smooth,
+        candidate_global_risk=total_risk,
+        anchor="graph",
+    )
+    return TemporalTeacher(
+        teacher=teacher, candidates=candidates, risks=risks,
+        weights=weights, knn_idx=knn_idx, confidence=confidence, method=method,
+    )
+
+
+
+def fuse_time_candidates_local(
+    candidates: Mapping[str, np.ndarray],
+    knn_idx: np.ndarray,
+    *,
+    tau: float = 0.15,
+    lambda_agreement: float = 3.0,
+    lambda_local_smooth: float = 1.0,
+    candidate_global_risk: Optional[Mapping[str, float]] = None,
+    anchor: str = "graph",
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
+    """Reference-label-free, per-cell reliability fusion over *ranked* time candidates.
+
+    Risks combine local graph discontinuity, disagreement with candidate median,
+    and optional training-only global risks. Opposite candidate signs are aligned
+    to an unsupervised anchor by rank correlation (no cell labels). Returns
+    (fused_time[N], confidence[N], mean_candidate_weights).
+
+    This is a proposed ablation, not a verified increase in POA/POAUC.
+    """
+    names = list(candidates)
+    if not names or anchor not in candidates:
+        raise ValueError("Fusion needs >=1 candidate including the unsupervised anchor")
+    kidx = np.asarray(knn_idx, dtype=np.int64)
+    n = np.asarray(candidates[anchor]).size
+    if n < 3 or kidx.ndim != 2 or kidx.shape[0] != n or kidx.shape[1] < 1:
+        raise ValueError("Need >=3 cells and at least one kNN per cell")
+    if kidx.min() < 0 or kidx.max() >= n:
+        raise ValueError("kNN indices out of bounds")
+    if tau <= 0 or lambda_agreement < 0 or lambda_local_smooth < 0:
+        raise ValueError("tau must be positive and risk weights nonnegative")
+
+    anchor_rank = rank01(np.asarray(candidates[anchor], dtype=float))
+    ranks, inactive = [], []
+    for name in names:
+        t = np.asarray(candidates[name], dtype=float).reshape(-1)
+        if len(t) != n or not np.isfinite(t).all():
+            raise ValueError(f"Invalid time candidate {name}: must be finite length {n}")
+        inactive.append(float(np.std(t)) < 1e-8)
+        r = rank01(t).astype(np.float64)
+        if name != anchor and np.std(r) > 1e-8 and np.std(anchor_rank) > 1e-8:
+            if np.corrcoef(r, anchor_rank)[0, 1] < 0:
+                r = 1.0 - r
+        ranks.append(r)
+    arr = np.stack(ranks, axis=0)  # [C,N]
+    median = np.median(arr, axis=0)
+    agreement_risk = np.abs(arr - median[None, :])
+    local_risk = np.abs(arr[:, :, None] - arr[:, kidx]).mean(axis=2)
+    global_risk = candidate_global_risk or {}
+    g = np.asarray([float(global_risk.get(name, 0.0)) for name in names])[:, None]
+    score = (
+        lambda_agreement * agreement_risk
+        + lambda_local_smooth * local_risk
+        + g
+    )
+    for i, bad in enumerate(inactive):
+        if bad and names[i] != anchor:
+            score[i, :] = 1e6
+    # Numerically stable local softmax across candidate methods.
+    logits = -score / tau
+    logits -= np.max(logits, axis=0, keepdims=True)
+    w = np.exp(logits)
+    w /= np.maximum(w.sum(axis=0, keepdims=True), 1e-12)
+    fused = np.sum(w * arr, axis=0)
+    # Rank-space fusion retains the relative ordering (critical for T3).
+    fused = normalize01(fused)
+    # Agreement-derived reliability, never based on ground-truth stage labels.
+    disagreement = np.sqrt(np.sum(w * (arr - fused[None, :]) ** 2, axis=0))
+    confidence = np.clip(np.exp(-4.0 * disagreement), 0.25, 1.0).astype(np.float32)
+    mean_weights = {name: float(w[i].mean()) for i, name in enumerate(names)}
+    return fused.astype(np.float32), confidence, mean_weights

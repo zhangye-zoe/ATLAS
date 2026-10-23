@@ -85,6 +85,10 @@ def build_dynamic_cache(model: ATLAS, data: Table2Data, cfg: Dict, device: torch
         lambda_mv=float(tc["lambda_mv"]),
         lambda_sp=float(tc["lambda_sp"]),
         target_std=float(tc["target_std"]),
+        method=str(tc.get("fusion_method", "global")),
+        consensus_tau=float(tc.get("consensus_tau", 0.15)),
+        lambda_agreement=float(tc.get("lambda_agreement", 3.0)),
+        lambda_local_smooth=float(tc.get("lambda_local_smooth", 1.0)),
     )
     banks = build_lag_banks(
         shared=shared,
@@ -166,6 +170,11 @@ def train_atlas(
                         {
                             "weights": dynamic.temporal.weights,
                             "risks": dynamic.temporal.risks,
+                            "method": dynamic.temporal.method,
+                            "confidence_mean": (
+                                float(dynamic.temporal.confidence.mean())
+                                if dynamic.temporal.confidence is not None else None
+                            ),
                         },
                         output_dir / "temporal_teacher.json",
                     )
@@ -259,6 +268,12 @@ def train_atlas(
                         out["h"],
                         teacher_pairs=pairs,
                         target_std=float(temporal_cfg["target_std"]),
+                        confidence=(
+                            torch.as_tensor(
+                                dynamic.temporal.confidence[idx_np],
+                                dtype=out["time"].dtype, device=device,
+                            ) if dynamic.temporal.confidence is not None else None
+                        ),
                     )
                     llag, lag_parts = lag_objective(
                         out,
@@ -434,13 +449,51 @@ def evaluate_table2(
     t3_time_head = t3_out["time"].cpu().numpy()
     h_fused = t3_out["h"].cpu().numpy()
 
-    # Historical CORAL sometimes reported DPT/graph-geodesic pseudotime
-    # instead of TimeHead. Keep TimeHead as the default to avoid silently
-    # changing existing Table-2 numbers. Select explicitly in evaluation YAML.
+    # T3 estimator selection is independent of training loss. The consensus
+    # branch performs rank-based fusion WITHOUT validation stage labels.
     t3_estimator = str(eval_cfg.get("t3_time_mode", "head"))
+    t3_fusion = None
     if t3_estimator == "head":
         t3_time = t3_time_head
         t3_estimator_source = "trained TimeHead"
+    elif t3_estimator == "consensus":
+        from .temporal import build_temporal_teacher, fuse_time_candidates_local, knn_graph
+        tc = cfg["temporal"]
+        val_teacher = build_temporal_teacher(
+            h=h_fused,
+            shared={name: t3_out["enc"][name]["mu_shared"].cpu().numpy()
+                    for name in model.modality_names},
+            masks={name: m_t3[name].cpu().numpy() for name in model.modality_names},
+            k_neighbors=int(tc["k_neighbors"]),
+            tau=float(tc["tau"]),
+            lambda_sm=float(tc["lambda_sm"]),
+            lambda_mv=float(tc["lambda_mv"]),
+            lambda_sp=float(tc["lambda_sp"]),
+            target_std=float(tc["target_std"]),
+            method="local_consensus",
+            consensus_tau=float(tc.get("consensus_tau", 0.15)),
+            lambda_agreement=float(tc.get("lambda_agreement", 3.0)),
+            lambda_local_smooth=float(tc.get("lambda_local_smooth", 1.0)),
+        )
+        # Head remains a candidate, but cannot determine its own reliability
+        # using validation labels. Each estimator is sign-aligned to graph.
+        t3_candidates = {"head": t3_time_head, **val_teacher.candidates}
+        t3_time, t3_conf, t3_weights = fuse_time_candidates_local(
+            t3_candidates,
+            val_teacher.knn_idx,
+            tau=float(tc.get("consensus_tau", 0.15)),
+            lambda_agreement=float(tc.get("lambda_agreement", 3.0)),
+            lambda_local_smooth=float(tc.get("lambda_local_smooth", 1.0)),
+            anchor="graph",
+        )
+        t3_fusion = {
+            "candidate_weights": t3_weights,
+            "mean_confidence": float(t3_conf.mean()),
+            "input_mode": mode,
+            "reference_labels_used_in_fusion": False,
+        }
+        save_json(t3_fusion, output_dir / "T3_consensus_diagnostics.json")
+        t3_estimator_source = "label-free local consensus of head/graph/diff/attr"
     else:
         from .legacy_t3 import get_t3_candidates
         if t3_estimator == "graph_root":
@@ -507,6 +560,7 @@ def evaluate_table2(
             "T3_input_mode": mode,
             "T3_time_estimator": t3_estimator,
             "T3_time_estimator_source": t3_estimator_source,
+            "T3_fusion_diagnostics": t3_fusion,
             "T3_reference_orientation_only_at_evaluation": bool(
                 eval_cfg.get("orient_time_for_metric", True)
             ),
