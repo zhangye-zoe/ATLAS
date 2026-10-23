@@ -119,3 +119,35 @@ def test_monitor_and_final_use_same_timehead_inference():
     assert len(train_t) == len(test_t) == 120
     np.testing.assert_array_equal(train_t, test_t)
     assert np.isfinite(train_t).all() and np.isfinite(test_t).all()
+
+
+class ToyWithLatentModel(torch.nn.Module):
+    def forward(self, x, masks, sample=False):
+        return {
+            "time": torch.sigmoid(x["atac"][:, 0] / 50.0),
+            "h": x["atac"][:, :2],
+        }
+
+
+def test_final_t3_artifact_export_returns_fused_h_without_extra_forward():
+    data = toy_table()
+    model = ToyWithLatentModel()
+    cfg = {"evaluation": {"t3_input_mode": "paired_fused", "t3_time_mode": "head"}}
+    result = infer_validation_t3(
+        model, data, cfg, torch.device("cpu"), return_latent=True,
+    )
+    assert len(result) == 7
+    assert result[-1].shape == (120, 2)
+    np.testing.assert_array_equal(result[-1], data.val_modalities["atac"][:, :2])
+    assert result[2] == "head"
+
+
+def test_final_artifact_requires_h_but_head_monitor_does_not():
+    data = toy_table()
+    model = ToyTimeHeadModel()
+    cfg = {"evaluation": {"t3_input_mode": "paired_fused", "t3_time_mode": "head"}}
+    assert len(infer_validation_t3(model, data, cfg, torch.device("cpu"))) == 6
+    with pytest.raises(ValueError, match="fused latent 'h'"):
+        infer_validation_t3(
+            model, data, cfg, torch.device("cpu"), return_latent=True,
+        )
