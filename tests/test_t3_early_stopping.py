@@ -78,12 +78,15 @@ def test_invalid_partition_fails_instead_of_leaking():
         split_monitor_report(data)
 
 
-def test_one_cell_stage_fails():
+def test_singleton_stage_is_heldout_and_not_used_for_checkpoint_selection():
     data = toy_table()
     data.labels[0] = "Unique"
     data.stage_map["Unique"] = 4
-    with pytest.raises(ValueError, match="only 1"):
-        split_monitor_report(data)
+    monitor, report, info = split_monitor_report(data)
+    assert monitor.labels[0] == "__t3_heldout_label__"
+    assert report.labels[0] == "Unique"
+    assert info["stage_counts"]["4"]["monitor"] == 0
+    assert info["stage_counts"]["4"]["report"] == 1
 
 
 def test_subset_validation_keeps_training_arrays_intact():
