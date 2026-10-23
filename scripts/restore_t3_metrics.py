@@ -91,10 +91,14 @@ def annotations_from_validation_obs(split_root: Path, label_column: str) -> pd.D
                 continue
             x = ad.read_h5ad(path, backed="r")
             try:
-                if label_column in x.obs.columns:
+                available = next(
+                    (key for key in (label_column, "cell_type", "predicted.celltype.l2")
+                     if key in x.obs.columns), None
+                )
+                if available is not None:
                     pieces.append(pd.DataFrame({
                         "cell_id": np.asarray(x.obs_names, dtype=str),
-                        "label": x.obs[label_column].astype(str).to_numpy(),
+                        "label": x.obs[available].astype(str).to_numpy(),
                     }))
             finally:
                 if x.isbacked:
@@ -218,7 +222,8 @@ def main() -> None:
         )
     if not args.dry_run:
         output_csv.parent.mkdir(parents=True, exist_ok=True)
-        labels.rename(columns={"label": label_column}).to_csv(output_csv, index=False)
+        output_label_column = cfg["external_labels"]["label_column"]
+        labels.rename(columns={"label": output_label_column}).to_csv(output_csv, index=False)
         pd.DataFrame(rows).sort_values("paired_ratio").to_csv(
             results_root / "t3_summary.csv", index=False
         )
