@@ -4,6 +4,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from atlas.temporal import build_temporal_teacher, fuse_time_candidates_local
 from atlas.losses import time_distillation_loss
