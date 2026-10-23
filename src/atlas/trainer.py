@@ -414,7 +414,7 @@ def train_atlas(
                 )
             history.append(row)
             print(
-                f"[{data.dataset_name} pair={data.paired_ratio:03d}] {phase} 
+                f"[{data.dataset_name} pair={data.paired_ratio:03d}] {phase} "
                 f"{epoch + 1:03d}/{n_epochs:03d} loss={row.get('total', float('nan')):.4f}"
             )
             if stop_phase3:
