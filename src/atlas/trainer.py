@@ -463,7 +463,8 @@ def train_atlas(
 @torch.no_grad()
 def infer_validation_t3(
     model: ATLAS, data: Table2Data, cfg: Dict, device: torch.device,
-) -> Tuple[np.ndarray, np.ndarray, str, str, Optional[Dict], str]:
+    *, return_latent: bool = False,
+) -> Tuple:
     """Compute EXACTLY the same label-free T3 prediction for monitoring and report.
 
     No reference stage or annotation enters this function. For graph-based
@@ -500,9 +501,16 @@ def infer_validation_t3(
     # T3 estimator selection is independent of training loss. The consensus
     # branch performs rank-based fusion WITHOUT validation stage labels.
     t3_estimator = str(eval_cfg.get("t3_time_mode", "head"))
-    # TimeHead-only inference needs no latent representation. This also keeps
-    # inference compatible with lightweight time-only test models.
-    if t3_estimator != "head":
+    # Head-only monitoring does not require 'h' (e.g. lightweight test models).
+    # Final artifact export requests it explicitly to save the fused latent
+    # embedding without a second model forward pass.
+    h_fused = None
+    if t3_estimator != "head" or return_latent:
+        if "h" not in t3_out:
+            raise ValueError(
+                "T3 fused latent 'h' required for graph/consensus inference "
+                "or final artifact export, but missing from model output."
+            )
         h_fused = t3_out["h"].cpu().numpy()
     t3_fusion = None
     if t3_estimator == "head":
@@ -562,7 +570,8 @@ def infer_validation_t3(
         t3_time = candidates[t3_estimator]
         t3_estimator_source = sources[t3_estimator]
 
-    return t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode
+    result = (t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode)
+    return (*result, h_fused) if return_latent else result
 
 
 @torch.no_grad()
@@ -639,8 +648,8 @@ def evaluate_table2(
     x_rna = torch.as_tensor(val["rna"], device=device)
     zr = model.encode_modality_only("rna", x_rna).cpu().numpy()
 
-    t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode = (
-        infer_validation_t3(model, data, cfg, device)
+    t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode, h_fused = (
+        infer_validation_t3(model, data, cfg, device, return_latent=True)
     )
     if t3_fusion is not None:
         save_json(t3_fusion, output_dir / "T3_consensus_diagnostics.json")
