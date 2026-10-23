@@ -16,6 +16,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from atlas.data import load_table2_split
+from atlas.early_stopping import split_monitor_report
 from atlas.model import ATLAS
 from atlas.trainer import evaluate_table2, train_atlas
 from atlas.utils import get_device, load_yaml, save_json, seed_everything
@@ -67,6 +68,21 @@ def main():
         data = load_table2_split(dataset_cfg, pair_ratio)
         run_dir = output_root / f"pair_{pair_ratio:03d}"
         run_dir.mkdir(parents=True, exist_ok=True)
+        early_cfg = model_cfg.get("early_stopping") or {}
+        monitor_data = None
+        report_data = data
+        partition_info = None
+        if early_cfg.get("enabled", False):
+            monitor_data, report_data, partition_info = split_monitor_report(
+                data,
+                monitor_fraction=float(early_cfg.get("monitor_fraction", 0.30)),
+                seed=seed,
+            )
+            save_json(partition_info, run_dir / "t3_validation_partition.json")
+            print(
+                f"T3 selection: {partition_info['monitor_cells']} labeled cells; "
+                f"held-out reporting: {partition_info['report_cells']} cells"
+            )
 
         mcfg = model_cfg["model"]
         input_dims = {m: x.shape[1] for m, x in data.modalities.items()}
@@ -80,8 +96,18 @@ def main():
             lag_edges=(("atac", "rna"),),
         )
         print(f"\n=== ATLAS {data.dataset_name}: paired={pair_ratio}% -> {data.split_dir.name} on {device} ===")
-        dynamic = train_atlas(model, data, model_cfg, device, run_dir)
-        metrics = evaluate_table2(model, data, dynamic, model_cfg, device, run_dir)
+        dynamic = train_atlas(
+            model, data, model_cfg, device, run_dir, monitor_data=monitor_data,
+        )
+        metrics = evaluate_table2(model, report_data, dynamic, model_cfg, device, run_dir)
+        if partition_info is not None:
+            metrics["protocol"]["T3_evaluation_partition"] = (
+                "held-out reporting subset; disjoint from early-stop monitor"
+            )
+            metrics["protocol"]["T3_monitor_cells"] = partition_info["monitor_cells"]
+            metrics["protocol"]["T3_report_cells"] = partition_info["report_cells"]
+            metrics["protocol"]["T3_supervised_checkpoint_selection"] = True
+            save_json(metrics, run_dir / "metrics.json")
         all_metrics.append(metrics)
         print(metrics)
 
