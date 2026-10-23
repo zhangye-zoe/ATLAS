@@ -281,7 +281,7 @@ def fuse_time_candidates_local(
     logits = -score / tau
     logits -= np.max(logits, axis=0, keepdims=True)
     w = np.exp(logits)
-    w /= w.sum(axis=0, keepdims=True).clip(min=1e-12)
+    w /= np.maximum(w.sum(axis=0, keepdims=True), 1e-12)
     fused = np.sum(w * arr, axis=0)
     # Rank-space fusion retains the relative ordering (critical for T3).
     fused = normalize01(fused)
