@@ -163,6 +163,16 @@ def train_atlas(
 
     es_cfg = cfg.get("early_stopping") or {}
     es_enabled = bool(es_cfg.get("enabled", False))
+    selection_policy = str(es_cfg.get("selection_policy", "legacy_all"))
+    if es_enabled and selection_policy not in {"legacy_all", "final", "phase3"}:
+        raise ValueError("early_stopping.selection_policy must be legacy_all, final or phase3")
+    freeze_phase3 = bool(es_cfg.get("freeze_representation_phase3", False))
+    fixed_teacher = bool(es_cfg.get("fixed_teacher_phase3", False))
+    if (freeze_phase3 or fixed_teacher) and not es_enabled:
+        raise ValueError("E3/E4 experiments need the monitor/report label protocol")
+    freeze_modules = ("encoders", "fusion", "fusion_refine", "decoders", "cross_predictors")
+    frozen_temporal = None
+    temporal_refresh_records = []
     if es_enabled and monitor_data is None:
         raise ValueError("early_stopping.enabled requires a separate monitor validation subset")
     if not es_enabled and monitor_data is not None:
@@ -188,11 +198,44 @@ def train_atlas(
     stop_phase3 = False
 
     for phase, n_epochs in phases:
+        if phase == "phase3" and freeze_phase3:
+            for name in freeze_modules:
+                for parameter in getattr(model, name).parameters():
+                    parameter.requires_grad_(False)
+            print("[E3] Phase III frozen: " + ", ".join(freeze_modules))
         for epoch in range(n_epochs):
             if phase == "phase3":
                 refresh = int(train_cfg.get("refresh_dynamic_every", 5))
                 if dynamic is None or phase3_epoch % max(refresh, 1) == 0:
-                    dynamic = build_dynamic_cache(model, data, cfg, device)
+                    if fixed_teacher and frozen_temporal is not None:
+                        # The temporal teacher is fixed at Phase-III entry.
+                        # Re-extract current shared embeddings and refresh lag banks
+                        # conditioned on the SAME teacher. This isolates teacher
+                        # refresh, without freezing the representations/lag features.
+                        h_new, shared_new, _ = infer_training_latents(model, data, device)
+                        refreshed_banks = build_lag_banks(
+                            shared=shared_new, masks=data.masks,
+                            time=frozen_temporal.teacher,
+                            edges=(("atac", "rna"),),
+                            n_bins=int(cfg["lag"]["bins"]),
+                        )
+                        dynamic = DynamicCache(
+                            h=h_new, shared=shared_new,
+                            time_teacher=frozen_temporal.teacher,
+                            temporal=frozen_temporal, lag_banks=refreshed_banks,
+                        )
+                    else:
+                        dynamic = build_dynamic_cache(model, data, cfg, device)
+                        if fixed_teacher and frozen_temporal is None:
+                            frozen_temporal = dynamic.temporal
+                    temporal_refresh_records.append({
+                        "phase3_epoch": phase3_epoch + 1,
+                        "teacher_fixed": bool(fixed_teacher),
+                        "teacher_mean": float(np.mean(dynamic.time_teacher)),
+                        "teacher_std": float(np.std(dynamic.time_teacher)),
+                        "teacher_fusion_method": dynamic.temporal.method,
+                    })
+                    save_json(temporal_refresh_records, output_dir / "teacher_refresh_history.json")
                     save_json(
                         {
                             "weights": dynamic.temporal.weights,
@@ -208,6 +251,9 @@ def train_atlas(
                 phase3_epoch += 1
 
             model.train()
+            if phase == "phase3" and freeze_phase3:
+                for name in freeze_modules:
+                    getattr(model, name).eval()
             accum: Dict[str, float] = {}
             n_batches = 0
             for idx, x, masks in loader:
@@ -227,7 +273,10 @@ def train_atlas(
                         for key, bank in dynamic.lag_banks.items()
                     }
 
-                out = model(x, masks, lag_banks=lag_banks_t, lag_valid=lag_valid_t)
+                out = model(
+                    x, masks, lag_banks=lag_banks_t, lag_valid=lag_valid_t,
+                    sample=False if phase == "phase3" and freeze_phase3 else None,
+                )
                 rec, kl = reconstruction_and_kl(out, x, masks)
                 mmd, ot, con = multilevel_alignment_loss(
                     out,
@@ -374,7 +423,15 @@ def train_atlas(
                     )
                 row["monitor_POA"] = scored["POA"]
                 row["monitor_POAUC"] = scored["POAUC"]
-                improved = score > best_score + es_min_delta
+                eligible = (
+                    selection_policy == "legacy_all"
+                    or (
+                        selection_policy == "phase3"
+                        and phase == "phase3"
+                        and epoch + 1 >= es_min_phase3
+                    )
+                )
+                improved = eligible and score > best_score + es_min_delta
                 if improved:
                     best_score = score
                     best_info = {
@@ -391,7 +448,7 @@ def train_atlas(
                         {"model_state": model.state_dict(), "best": best_info},
                         output_dir / "best_t3.pt",
                     )
-                if phase == "phase3":
+                if phase == "phase3" and eligible:
                     bad_phase3_checks = 0 if improved else bad_phase3_checks + 1
                     if (epoch + 1 >= es_min_phase3 and
                             bad_phase3_checks >= es_patience):
@@ -401,7 +458,8 @@ def train_atlas(
                     "global_epoch": len(history) + 1,
                     "POA": float(scored["POA"]),
                     "POAUC": float(scored["POAUC"]),
-                    "best_so_far": float(best_score),
+                    "best_so_far": float(best_score) if np.isfinite(best_score) else None,
+                    "eligible_for_selection": bool(eligible),
                     "improved": bool(improved),
                     "bad_phase3_checks": bad_phase3_checks,
                 })
@@ -429,9 +487,11 @@ def train_atlas(
                 output_dir / f"checkpoint_{phase}_last.pt",
             )
 
-    if es_enabled:
+    if es_enabled and selection_policy != "final":
         if best_info is None:
-            raise RuntimeError("No valid checkpoint-monitor evaluation was recorded")
+            raise RuntimeError("No valid checkpoint available for selection")
+        if selection_policy == "phase3" and best_info["phase"] != "phase3":
+            raise AssertionError("An earlier-phase model cannot be selected")
         best_ckpt = torch.load(output_dir / "best_t3.pt", map_location=device)
         model.load_state_dict(best_ckpt["model_state"])
         save_json(
@@ -445,6 +505,20 @@ def train_atlas(
             f"  [restore-best] {best_info['phase']} epoch "
             f"{best_info['phase_epoch']} {es_metric}={best_info['score']:.4f}"
         )
+    if es_enabled and selection_policy == "final":
+        save_json({
+            "selection_policy": "final",
+            "selected_phase": "phase3",
+            "selected_epoch": int(phases[-1][1]),
+            "early_stopped_phase3": False,
+            "checkpoint_loaded_for_final_evaluation": "final_weights",
+        }, output_dir / "early_stopping_summary.json")
+    if es_enabled:
+        save_json({
+            "selection_policy": selection_policy,
+            "freeze_representation_phase3": freeze_phase3,
+            "fixed_teacher_phase3": fixed_teacher,
+        }, output_dir / "e1_e4_experiment_protocol.json")
     dynamic = build_dynamic_cache(model, data, cfg, device)
     torch.save(
         {
@@ -463,7 +537,8 @@ def train_atlas(
 @torch.no_grad()
 def infer_validation_t3(
     model: ATLAS, data: Table2Data, cfg: Dict, device: torch.device,
-) -> Tuple[np.ndarray, np.ndarray, str, str, Optional[Dict], str]:
+    *, return_latent: bool = False,
+) -> Tuple:
     """Compute EXACTLY the same label-free T3 prediction for monitoring and report.
 
     No reference stage or annotation enters this function. For graph-based
@@ -496,11 +571,21 @@ def infer_validation_t3(
         raise ValueError(f"Unknown evaluation.t3_input_mode={mode}")
     t3_out = model(x_t3, m_t3, sample=False)
     t3_time_head = t3_out["time"].cpu().numpy()
-    h_fused = t3_out["h"].cpu().numpy()
 
     # T3 estimator selection is independent of training loss. The consensus
     # branch performs rank-based fusion WITHOUT validation stage labels.
     t3_estimator = str(eval_cfg.get("t3_time_mode", "head"))
+    # Head-only monitoring does not require 'h' (e.g. lightweight test models).
+    # Final artifact export requests it explicitly to save the fused latent
+    # embedding without a second model forward pass.
+    h_fused = None
+    if t3_estimator != "head" or return_latent:
+        if "h" not in t3_out:
+            raise ValueError(
+                "T3 fused latent 'h' required for graph/consensus inference "
+                "or final artifact export, but missing from model output."
+            )
+        h_fused = t3_out["h"].cpu().numpy()
     t3_fusion = None
     if t3_estimator == "head":
         t3_time = t3_time_head
@@ -559,7 +644,8 @@ def infer_validation_t3(
         t3_time = candidates[t3_estimator]
         t3_estimator_source = sources[t3_estimator]
 
-    return t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode
+    result = (t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode)
+    return (*result, h_fused) if return_latent else result
 
 
 @torch.no_grad()
@@ -636,8 +722,8 @@ def evaluate_table2(
     x_rna = torch.as_tensor(val["rna"], device=device)
     zr = model.encode_modality_only("rna", x_rna).cpu().numpy()
 
-    t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode = (
-        infer_validation_t3(model, data, cfg, device)
+    t3_time, t3_time_head, t3_estimator, t3_estimator_source, t3_fusion, mode, h_fused = (
+        infer_validation_t3(model, data, cfg, device, return_latent=True)
     )
     if t3_fusion is not None:
         save_json(t3_fusion, output_dir / "T3_consensus_diagnostics.json")

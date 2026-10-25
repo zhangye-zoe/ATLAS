@@ -65,7 +65,10 @@ def main():
     all_metrics = []
 
     for pair_ratio in args.pair_ratios:
-        seed = int(model_cfg.get("seed", 1234)) + int(pair_ratio)
+        # Experimental protocol: keep seed identical across ratios.
+        # Default false preserves historical behavior outside E1-E4.
+        seed_offset = 0 if model_cfg.get("fixed_seed_across_ratios", False) else int(pair_ratio)
+        seed = int(model_cfg.get("seed", 1234)) + seed_offset
         seed_everything(seed)
         data = load_table2_split(dataset_cfg, pair_ratio)
         run_dir = output_root / f"pair_{pair_ratio:03d}"

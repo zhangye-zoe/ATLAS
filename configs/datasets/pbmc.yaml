@@ -13,7 +13,7 @@ target_rna_file: val_true_rna.h5ad
 label_key: cell_type
 # Optional if cell_type is not already stored in .obs. Keep null to use .obs only.
 external_labels:
-  csv: null
+  csv: '/data5/zhangye/ATLAS/data/external/annotations/pbmc_azimuth_annotations.csv'
   cell_column: cell_id
   label_column: predicted.celltype.l2
 stage_map:

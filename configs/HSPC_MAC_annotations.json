@@ -1,0 +1,55 @@
+{
+  "stage_order_map": {
+    "HSC": 0,
+    "LMPP": 1,
+    "CMP": 1,
+    "GMP": 1,
+    "MEP": 1,
+    "Prog B": 1,
+    "Prog DC": 1,
+    "Prog MK": 1,
+    "DC": 2,
+    "Granulocyte": 2,
+    "Erythrocyte": 2,
+    "Megakaryocyte": 2,
+    "Platelet": 2,
+    "Mast Cells": 2,
+    "MDP": 1,
+    "Monocyte": 2,
+    "M1 Macrophage": 2,
+    "M2 Macrophage": 2
+  },
+  "future_map": {
+    "LMPP": "lymphoid_dc",
+    "Prog B": "lymphoid_dc",
+    "Prog DC": "lymphoid_dc",
+    "DC": "lymphoid_dc",
+    "CMP": "myeloid",
+    "GMP": "myeloid",
+    "Granulocyte": "myeloid",
+    "Mast Cells": "myeloid",
+    "MEP": "ery_platelet",
+    "Prog MK": "ery_platelet",
+    "Megakaryocyte": "ery_platelet",
+    "Platelet": "ery_platelet",
+    "Erythrocyte": "ery_platelet",
+    "MDP": "myeloid",
+    "Monocyte": "myeloid",
+    "M1 Macrophage": "myeloid",
+    "M2 Macrophage": "myeloid"
+  },
+  "terminal_types": [
+    "DC",
+    "Granulocyte",
+    "Erythrocyte",
+    "Megakaryocyte",
+    "Platelet",
+    "Mast Cells",
+    "Monocyte",
+    "M1 Macrophage",
+    "M2 Macrophage"
+  ],
+  "exclude_eval_types": [
+    "HSC"
+  ]
+}
